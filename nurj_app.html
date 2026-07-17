@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Nurj</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0C0B09; --surf:#161514; --surf2:#1E1C1A;
+  --gold:#C8922A; --gold2:#E8B84B;
+  --w100:#FFF; --w70:rgba(255,255,255,0.72); --w50:rgba(255,255,255,0.5);
+  --w30:rgba(255,255,255,0.32); --w15:rgba(255,255,255,0.14); --w06:rgba(255,255,255,0.06);
+  --green:#97C459; --greenD:#27500A;
+  --r-lg:16px; --r-md:12px; --r-sm:8px;
+  --col:560px;
+  --navH:76px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:var(--bg);font-family:'Sora',-apple-system,sans-serif;color:var(--w70)}
+button{font-family:inherit;cursor:pointer;border:none;transition:transform .12s ease,opacity .12s ease,background .15s ease,border-color .15s ease,color .15s ease}
+button:active{transform:scale(0.97)}
+textarea{font-family:inherit}
+.serif{font-family:'Instrument Serif',Georgia,serif}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes shimmer{0%{background-position:-200px 0}100%{background-position:200px 0}}
+@keyframes popIn{0%{opacity:0;transform:scale(.85)}60%{transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+.slide-in{animation:slideIn .28s cubic-bezier(.2,.7,.3,1)}
+.pop-in{animation:popIn .4s cubic-bezier(.2,.7,.3,1)}
+
+/* prototype bar — slim, top, dismissible */
+.proto{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;gap:4px;flex-wrap:wrap;justify-content:center;align-items:center;padding:8px 12px;background:rgba(12,11,9,0.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--w06)}
+.proto button{padding:4px 10px;font-size:10px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);color:rgba(255,255,255,0.4);letter-spacing:.02em}
+.proto button.on{border-color:var(--gold);background:var(--gold);color:var(--bg);font-weight:600}
+.proto .close{margin-left:6px;color:var(--w30);font-size:13px;border:none;background:none;padding:2px 8px}
+body.proto-hidden .proto{display:none}
+body.proto-hidden .app{padding-top:0}
+
+/* app shell */
+.app{min-height:100vh;display:flex;flex-direction:column;padding-top:44px}
+.screen-wrap{flex:1;display:flex;flex-direction:column;width:100%;max-width:var(--col);margin:0 auto;padding-bottom:calc(var(--navH) + 16px)}
+.screen-wrap.no-nav{padding-bottom:24px}
+.screen{flex:1;display:flex;flex-direction:column;width:100%}
+
+/* bottom nav — fixed */
+.bottomnav{position:fixed;bottom:0;left:0;right:0;z-index:40;display:none;justify-content:center;background:rgba(12,11,9,0.94);backdrop-filter:blur(12px);border-top:1px solid var(--w06);padding:10px 0 max(16px, env(safe-area-inset-bottom))}
+.bottomnav.on{display:flex}
+.bottomnav .inner{display:flex;justify-content:space-around;width:100%;max-width:var(--col)}
+.bottomnav button{background:none;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 18px;min-width:70px}
+.bottomnav .ic{font-size:21px;color:var(--w30);transition:color .15s}
+.bottomnav .lb{font-size:10px;font-weight:500;color:var(--w30);transition:color .15s}
+.bottomnav button.on .ic,.bottomnav button.on .lb{color:var(--gold2)}
+
+/* primitives */
+.gold-btn{width:100%;background:var(--gold);color:var(--bg);border-radius:var(--r-md);padding:16px;font-size:15px;font-weight:600;letter-spacing:.01em}
+.gold-btn:disabled{background:var(--surf2);color:var(--w30);cursor:default}
+.ghost-btn{width:100%;background:transparent;color:var(--w50);border:1px solid var(--w15);border-radius:var(--r-md);padding:15px;font-size:14px}
+.quiet-btn{background:transparent;color:var(--w30);padding:10px;font-size:13px;width:100%}
+.card{background:var(--surf);border:1px solid var(--w06);border-radius:var(--r-lg)}
+.eyebrow{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.14em;font-weight:600}
+.spinner{border:2.5px solid var(--w06);border-top:2.5px solid var(--gold);border-radius:50%;animation:spin .7s linear infinite}
+.skeleton{background:linear-gradient(90deg,var(--surf) 25%,var(--surf2) 50%,var(--surf) 75%);background-size:400px 100%;animation:shimmer 1.2s infinite linear;border-radius:6px}
+.opt{background:var(--surf);border:1px solid var(--w06);border-radius:var(--r-md);padding:16px;text-align:left;color:var(--w70);font-size:14px;line-height:1.5;width:100%;min-height:52px;display:flex;align-items:center}
+.opt:hover{border-color:rgba(200,146,42,0.5);color:var(--w100)}
+.opt.sel{background:rgba(200,146,42,0.09);border-color:var(--gold);color:var(--gold2)}
+.chip{font-size:11px;color:var(--gold);background:rgba(200,146,42,0.09);padding:4px 11px;border-radius:20px;border:0.5px solid rgba(200,146,42,0.2);font-weight:500}
+.chip-grey{font-size:11px;color:var(--w50);background:var(--w06);padding:4px 11px;border-radius:20px;font-weight:500}
+
+/* stepper */
+.stepper{display:flex;align-items:center;gap:6px;margin-bottom:20px}
+.step-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;background:var(--surf2);color:var(--w30);border:1px solid var(--w06);flex-shrink:0}
+.step-dot.done{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+.step-dot.active{border-color:var(--gold);color:var(--gold2);background:rgba(200,146,42,0.09)}
+.step-line{flex:1;height:1px;background:var(--w06)}
+.step-line.done{background:rgba(200,146,42,0.4)}
+.step-lbl{font-size:10px;color:var(--w30);font-weight:500}
+.step-lbl.active{color:var(--gold2)}
+
+/* prompt output */
+.prompt-box{background:var(--surf);border:1px solid var(--w06);border-left:3px solid var(--gold);border-radius:var(--r-md);padding:18px}
+.prompt-text{font-size:13px;color:var(--w70);line-height:1.9;white-space:pre-wrap;word-break:break-word}
+.cursor{display:inline-block;width:2px;height:14px;background:var(--gold2);animation:pulse .8s infinite;vertical-align:text-bottom;margin-left:1px}
+
+.upsell{background:rgba(200,146,42,0.06);border:1px solid rgba(200,146,42,0.16);border-radius:var(--r-lg);padding:20px;text-align:center}
+.upsell .h{font-size:15px;color:var(--gold2);font-weight:600;margin-bottom:6px}
+.upsell .p{font-size:13px;color:var(--w50);margin-bottom:16px;line-height:1.6}
+.upsell button{background:var(--gold);color:var(--bg);border-radius:var(--r-sm);padding:13px 24px;font-size:14px;font-weight:600}
+
+/* desktop niceties */
+@media(min-width:600px){
+  .screen-wrap{padding-left:0;padding-right:0}
+  h1.serif{letter-spacing:-0.015em}
+}
+</style>
+</head>
+<body>
+
+<div class="proto" id="jumpNav"></div>
+
+<div class="app">
+  <div class="screen-wrap" id="wrap">
+    <div class="screen" id="screens"></div>
+  </div>
+</div>
+
+<div class="bottomnav" id="bottomNav"><div class="inner" id="bottomNavInner"></div></div>
+
+<script>
+// ═══════════ DATA ═══════════
+const QUIZ = [
+  { q:"How far along is your side hustle?", opts:[
+    {l:"I have an idea but haven't started",v:0},
+    {l:"Started, but no money yet",v:1},
+    {l:"Making money, but it's inconsistent",v:2},
+    {l:"Consistent income every month",v:3}]},
+  { q:"What are you earning from it monthly?", opts:[
+    {l:"Nothing yet",v:0},{l:"Under ₦50,000",v:1},
+    {l:"₦50,000 – ₦300,000",v:2},{l:"₦300,000+",v:3}]},
+  { q:"Your biggest goal for the next 3 months?", opts:[
+    {l:"Prove my idea is real",v:0},
+    {l:"Land my first paying clients",v:1},
+    {l:"Make my income predictable",v:2},
+    {l:"Replace my salary — go full-time",v:3}]},
+  { q:"What's holding you back most?", opts:[
+    {l:"I don't know where to start",v:0},
+    {l:"Getting clients who actually pay",v:1},
+    {l:"Income goes up and down",v:2},
+    {l:"Working hard, growing slow",v:3}]},
+  { q:"Hours you can give it per week?", opts:[
+    {l:"Under 5",v:0},{l:"5–10",v:1},{l:"10–20",v:2},{l:"20+",v:3}]}
+];
+
+const STAGES = [
+  { key:'validation', label:'Validation', num:1, emoji:'🔍',
+    desc:'Prove your idea is real before going all in.',
+    firstMove:'Talk to 10 potential customers this week',
+    firstCat:'consulting', firstGoal:'Create a cold outreach email',
+    actions:['Talk to 10 potential customers this week','Define your one target customer clearly','Offer your service free to 3 people for feedback']},
+  { key:'launch', label:'Launch', num:2, emoji:'🚀',
+    desc:'Land your first consistent paying clients.',
+    firstMove:'Send your first outreach DM today',
+    firstCat:'graphics', firstGoal:'Write a cold DM to a potential client',
+    actions:['Write your service offer in one clear sentence','Send 5 outreach DMs using Nurj prompts today','Set up Paystack to accept payments professionally']},
+  { key:'scaling', label:'Scaling', num:3, emoji:'📈',
+    desc:'Grow your income without working more hours.',
+    firstMove:'Raise your prices for new clients',
+    firstCat:'consulting', firstGoal:'Price my consulting packages',
+    actions:['Raise your prices 30% for all new clients','Document your process so it can run without you','Create one content piece per week that attracts clients']},
+  { key:'exit', label:'Exit 9-5', num:4, emoji:'🏆',
+    desc:'Make the full-time switch with confidence.',
+    firstMove:'Build the retainer that replaces your salary',
+    firstCat:'consulting', firstGoal:'Write a service offer',
+    actions:['Calculate your 6-month runway before quitting','Build a client retainer that covers your salary','Set your exit date and work backwards from it']}
+];
+
+const CATS = [
+  {id:'graphics',label:'Graphics Design',icon:'🎨'},
+  {id:'skincare',label:'Skincare & Beauty',icon:'💄'},
+  {id:'tutoring',label:'Tutoring',icon:'📚'},
+  {id:'fashion',label:'Fashion',icon:'👗'},
+  {id:'food',label:'Food Business',icon:'🍳'},
+  {id:'consulting',label:'Consulting',icon:'💼'}
+];
+
+const GOALS = {
+  graphics:['Write a cold DM to a potential client','Create my service offer','Write my Instagram bio','Script a client proposal','Price my design services','Plan my content calendar'],
+  skincare:['Write a product description','Create a sales DM','Plan my Instagram content','Write a launch announcement','Script a WhatsApp broadcast','Create an FAQ for my brand'],
+  tutoring:['Write a course announcement','Create a student outreach script','Plan my curriculum','Write a testimonial request','Price my tutoring sessions','Build my first lesson plan'],
+  fashion:['Write a new collection caption','Create a sales DM','Plan a launch campaign','Write a wholesale pitch','Script a size guide post','Build a content calendar'],
+  food:['Write a menu description','Create an order announcement','Plan a delivery post','Write a catering pitch','Script a product launch','Create a loyalty message'],
+  consulting:['Write a service offer','Create a cold outreach email','Script a discovery call','Write a case study','Plan a LinkedIn content strategy','Price my consulting packages']
+};
+
+const PROMPTS = {
+  'graphics|Write a cold DM to a potential client':
+`You are a business development consultant specialising in creative services for fashion and beauty brands in Lagos, Nigeria.
+
+I run a one-person graphics design business creating logos, social media visuals, and brand identities for Nigerian fashion brands. I'm reaching out to a Lagos-based fashion brand I found on Instagram — they post good products but their visual identity is inconsistent.
+
+Write a direct DM under 100 words. Professional but warm — a real person, not a template. No pricing mention. Focus on one observation: inconsistent visuals make the brand look smaller than it is. End with one low-pressure question asking if they'd be open to a quick conversation.`,
+  'consulting|Create a cold outreach email':
+`You are a business development advisor who helps independent consultants in Lagos, Nigeria win their first clients.
+
+I'm validating a consulting service idea. My target customer is [describe them — e.g. small Lagos business owners struggling with X]. I want to reach out to 10 of them this week to test whether my idea solves a real problem they'd pay for.
+
+Write a short outreach email under 120 words. Curious, not salesy — I'm asking for a 15-minute conversation to learn about their challenges, not pitching. Mention I'm researching this specific problem. End with a specific, easy ask: "Would you have 15 minutes this week?"`,
+  'consulting|Price my consulting packages':
+`You are a pricing strategist who has helped dozens of Nigerian consultants move from hourly billing to premium packages.
+
+I run a consulting business earning consistently, but I've hit a ceiling. My current pricing: [describe]. My clients: [describe]. I work more hours than I should for what I earn.
+
+Create three package tiers (naira pricing) that move me from selling hours to selling outcomes. For each: name, price, what's included, and the one-line pitch. Anchor the top tier 3–4x above my current effective rate. Explain the psychology of why the middle tier will sell most.`,
+  'consulting|Write a service offer':
+`You are a positioning expert who helps Nigerian professionals turn side hustles into full-time businesses.
+
+My side hustle income is approaching my salary. I need one retainer-based service offer strong enough that 2–3 clients on it would fully replace my 9-5 income of ₦[amount]/month.
+
+Write my service offer: the one-sentence value proposition, the monthly retainer price, exactly what the client gets each month, and the guarantee that removes their risk. Make it specific enough to send to a warm lead today.`,
+  default:
+`You are a business consultant with deep expertise in [your industry] in Lagos, Nigeria.
+
+I run a [type of business] that [what it does] for [target customer]. My current situation: [specific context]. My goal: [exactly what I want to achieve].
+
+Write this as a [format] under [length]. Tone: [professional/warm/direct]. Include Nigerian market context — ₦ pricing, local platforms (Paystack, Selar, Instagram), Lagos business dynamics.
+
+Do not include [what to exclude]. Focus only on [the one thing that matters most]. End with [specific requirement].`
+};
+
+const GUIDES = [
+  {title:'Write your first service offer in 30 minutes',desc:'The one document that gets you paid.',locked:false},
+  {title:'How to price your side hustle service',desc:"Stop undercharging. Here's the formula.",locked:false},
+  {title:'Your first 10 clients: the outreach system',desc:'DMs, LinkedIn, and WhatsApp that convert.',locked:true},
+  {title:'Instagram content calendar template',desc:'4 weeks of posts, ready to fill in.',locked:true},
+  {title:'Invoice and payment setup guide',desc:'Look professional. Get paid on time.',locked:true},
+  {title:'How to raise your prices without losing clients',desc:'The script that actually works.',locked:true}
+];
+
+const ENHANCED_TEMPLATE = `You are a [specific expert] with deep experience in [your industry] in Lagos, Nigeria.
+
+I run a [type of business] that [what it does]. Current situation: [specific Nigerian market context]. Goal: [exactly what you want to achieve].
+
+Write as [format]. Length: [specific]. Tone: [professional/warm/direct].
+
+Do not include [what to exclude]. Focus only on [the one thing]. End with [specific requirement].`;
+
+const ENHANCE_WHY = 'Added Role (expert lens), Context (your specific situation), Format (output structure), and Constraint (what to exclude + how to end). Result quality increases 4–6x.';
+
+// ═══════════ STATE ═══════════
+const S = {
+  screen:'splash', quizStep:0, scores:[], stage:null,
+  firstPrompt:null, firstPromptTyped:false,
+  cat:null, goal:null, genStep:'cat', genLoading:false, genOut:null, pCount:0,
+  tier:'free', enhIn:'', enhLoading:false, enhOut:null, eCount:0,
+  nav:'home', guideTab:'launch', planSel:'builder', paying:false, paid:false
+};
+
+let typeTimer = null;
+const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const defStage = () => S.stage || STAGES[1];
+const left  = () => Math.max(0, 5 - S.pCount);
+const eLeft = () => Math.max(0, 3 - S.eCount);
+const isBlurred = () => S.tier==='free' && S.eCount>=3;
+
+function assignStage(sc){
+  const avg = sc.reduce((a,b)=>a+b,0)/sc.length;
+  return STAGES[avg<1?0:avg<2?1:avg<3?2:3];
+}
+
+function firstPromptFor(stage){
+  return PROMPTS[stage.firstCat+'|'+stage.firstGoal] || PROMPTS.default;
+}
+
+function go(s){
+  if(typeTimer){ clearInterval(typeTimer); typeTimer=null; }
+  if(['home','generate','enhance','guides'].includes(s)){
+    if(!S.stage) S.stage = STAGES[1];
+    S.nav = s;
+  }
+  if(s==='generate'){ S.genStep='cat'; S.genOut=null; S.goal=null; }
+  if(s==='enhance'){ S.enhOut=null; }
+  if(s==='upgrade'){ S.paid=false; }
+  if(s==='result' && !S.stage){ S.stage = STAGES[1]; }
+  S.screen = s;
+  window.scrollTo({top:0,behavior:'instant' in window ? 'instant' : 'auto'});
+  render();
+}
+
+function answerQuiz(v){
+  S.scores.push(v);
+  if(S.quizStep<4){ S.quizStep++; render(); }
+  else {
+    S.stage = assignStage(S.scores);
+    S.firstPrompt = firstPromptFor(S.stage);
+    S.firstPromptTyped = false;
+    S.pCount++;
+    go('result');
+  }
+}
+
+function pickCat(id){ S.cat = CATS.find(c=>c.id===id); S.genStep='goal'; S.goal=null; render(); }
+function pickGoal(i){ S.goal = GOALS[S.cat.id][i]; render();
+  const btn=document.getElementById('genGo'); if(btn) btn.scrollIntoView({behavior:reducedMotion?'auto':'smooth',block:'nearest'});
+}
+
+function generate(){
+  S.genLoading=true; S.genOut=null; render();
+  setTimeout(()=>{
+    const key = S.cat.id+'|'+S.goal;
+    S.genOut = PROMPTS[key]||PROMPTS.default;
+    S.genLoading=false; S.genStep='result'; S.pCount++;
+    render();
+    typewrite('genText', S.genOut);
+  },1600);
+}
+
+function enhance(){
+  const inp = document.getElementById('enhInput');
+  const val = inp ? inp.value : S.enhIn;
+  if(!val.trim()) return;
+  S.enhIn = val; S.enhLoading=true; S.enhOut=null; render();
+  setTimeout(()=>{
+    S.enhOut = { before:val, after:ENHANCED_TEMPLATE, why:ENHANCE_WHY };
+    S.enhLoading=false; S.eCount++;
+    render();
+  },1400);
+}
+
+function typewrite(elId, text){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  if(reducedMotion){ el.innerHTML = esc(text); return; }
+  let i = 0;
+  el.innerHTML = '<span class="cursor"></span>';
+  if(typeTimer) clearInterval(typeTimer);
+  typeTimer = setInterval(()=>{
+    i += 4;
+    if(i >= text.length){
+      el.innerHTML = esc(text);
+      clearInterval(typeTimer); typeTimer=null;
+    } else {
+      el.innerHTML = esc(text.slice(0,i)) + '<span class="cursor"></span>';
+    }
+  }, 16);
+}
+
+function copyText(kind, btnId){
+  const map = { gen:S.genOut, first:S.firstPrompt, enh:S.enhOut?S.enhOut.after:'' };
+  const text = map[kind]||'';
+  if(navigator.clipboard){ navigator.clipboard.writeText(text).catch(()=>{}); }
+  const btn = document.getElementById(btnId);
+  if(btn){
+    const orig = btn.textContent;
+    btn.textContent='✓ Copied';
+    btn.style.background='var(--greenD)'; btn.style.color='#FFF';
+    setTimeout(()=>{ btn.textContent=orig; btn.style.background='var(--gold)'; btn.style.color='var(--bg)'; },1800);
+  }
+}
+
+function pickPlan(p){ S.planSel=p; render(); }
+function pay(){
+  S.paying=true; render();
+  setTimeout(()=>{ S.tier=S.planSel; S.paying=false; S.paid=true; render(); },2200);
+}
+function backGen(){ S.genStep = S.genStep==='result'?'goal':'cat'; render(); }
+function resetGen(){ S.genStep='cat'; S.goal=null; S.genOut=null; render(); }
+function setGuideTab(t){ S.guideTab=t; render(); }
+function quizBack(){ if(S.quizStep>0){ S.quizStep--; S.scores.pop(); render(); } else go('splash'); }
+function hideProto(){ document.body.classList.add('proto-hidden'); }
+
+// ═══════════ RENDER ═══════════
+function render(){
+  renderJump(); renderBottomNav();
+  const showNav = ['home','generate','enhance','guides'].includes(S.screen);
+  document.getElementById('wrap').className = 'screen-wrap'+(showNav?'':' no-nav');
+  document.getElementById('screens').innerHTML =
+    `<div class="screen slide-in">${SCREENS[S.screen]()}</div>`;
+  const enhI = document.getElementById('enhInput');
+  if(enhI){
+    enhI.value = S.enhIn;
+    enhI.addEventListener('input',e=>{S.enhIn=e.target.value; toggleEnhBtn();});
+    toggleEnhBtn();
+  }
+  if(S.screen==='result' && !S.firstPromptTyped){
+    S.firstPromptTyped = true;
+    setTimeout(()=>typewrite('firstText', S.firstPrompt), 500);
+  }
+}
+
+function toggleEnhBtn(){
+  const b = document.getElementById('enhBtn');
+  if(b) b.disabled = !S.enhIn.trim() || S.enhLoading;
+}
+
+function renderJump(){
+  const items = [['splash','Splash'],['quiz','Quiz'],['result','First Prompt'],['home','Dashboard'],['generate','Generator'],['enhance','Enhancer'],['guides','Guides'],['upgrade','Upgrade']];
+  document.getElementById('jumpNav').innerHTML =
+    '<span style="font-size:9px;color:var(--w30);letter-spacing:.1em;margin-right:4px">PROTOTYPE</span>' +
+    items.map(([s,l])=>`<button class="${S.screen===s?'on':''}" onclick="go('${s}')">${l}</button>`).join('') +
+    '<button class="close" onclick="hideProto()" title="Hide prototype bar">✕</button>';
+}
+
+function renderBottomNav(){
+  const show = ['home','generate','enhance','guides'].includes(S.screen);
+  const nav = document.getElementById('bottomNav');
+  nav.className = 'bottomnav'+(show?' on':'');
+  if(show){
+    document.getElementById('bottomNavInner').innerHTML =
+      [['home','⊞','Home'],['generate','⚡','Generate'],['enhance','✦','Enhance'],['guides','📖','Guides']].map(([s,ic,lb])=>
+      `<button class="${S.nav===s?'on':''}" onclick="go('${s}')"><span class="ic">${ic}</span><span class="lb">${lb}</span></button>`).join('');
+  }
+}
+
+function stepper(active){
+  const steps=[['Category',1],['Goal',2],['Prompt',3]];
+  return `<div class="stepper">${steps.map(([lb,n],i)=>`
+    ${i>0?`<div class="step-line ${active>n-1?'done':''}"></div>`:''}
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+      <div class="step-dot ${active>n?'done':active===n?'active':''}">${active>n?'✓':n}</div>
+      <span class="step-lbl ${active===n?'active':''}">${lb}</span>
+    </div>`).join('')}</div>`;
+}
+
+// ═══════════ SCREENS ═══════════
+const SCREENS = {
+
+splash(){ return `
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 28px;position:relative;min-height:calc(100vh - 60px)">
+    <div style="position:absolute;top:8%;left:50%;transform:translateX(-50%);width:min(420px,80vw);height:320px;background:radial-gradient(circle,rgba(200,146,42,0.1) 0%,transparent 70%);border-radius:50%;pointer-events:none"></div>
+    <p style="font-size:12px;font-weight:600;letter-spacing:0.32em;color:var(--w30);margin-bottom:56px">NURJ</p>
+    <h1 class="serif" style="font-size:clamp(42px,9vw,58px);font-weight:400;color:var(--w100);text-align:center;line-height:1.06">Stop wasting prompts.</h1>
+    <h1 class="serif" style="font-size:clamp(42px,9vw,58px);font-weight:400;color:var(--gold2);text-align:center;line-height:1.06;margin:8px 0 26px;font-style:italic">Start building.</h1>
+    <p style="font-size:15px;color:var(--w50);text-align:center;line-height:1.75;margin-bottom:14px;font-weight:300;max-width:320px">AI prompts built for Nigerian side hustlers — matched to your stage, your business, your goals.</p>
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:44px">
+      <span style="width:5px;height:5px;border-radius:50%;background:var(--gold2);animation:pulse 2s infinite"></span>
+      <span style="font-size:12px;color:var(--gold2)">Your first prompt in 60 seconds</span>
+    </div>
+    <div style="width:100%;max-width:360px">
+      <button class="gold-btn" onclick="go('quiz')">Get my first prompt →</button>
+      <div style="height:10px"></div>
+      <button class="ghost-btn" onclick="go('home')">I already have an account</button>
+    </div>
+  </div>`;
+},
+
+quiz(){ const q=QUIZ[S.quizStep]; return `
+  <div style="padding:28px 24px 24px;flex:1;max-width:480px;width:100%;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:28px">
+      <button onclick="quizBack()" style="background:none;color:var(--w30);font-size:20px;line-height:1;padding:4px">←</button>
+      <div style="flex:1;height:3px;background:var(--w06);border-radius:2px;overflow:hidden">
+        <div style="height:100%;width:${((S.quizStep+1)/5)*100}%;background:linear-gradient(90deg,var(--gold),var(--gold2));border-radius:2px;transition:width .45s cubic-bezier(.2,.7,.3,1)"></div>
+      </div>
+      <span style="font-size:11px;color:var(--w30);font-variant-numeric:tabular-nums">${S.quizStep+1}/5</span>
+    </div>
+    <h2 class="serif" style="font-size:clamp(26px,6vw,32px);font-weight:400;color:var(--w100);line-height:1.3;margin-bottom:30px">${q.q}</h2>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${q.opts.map(o=>`<button class="opt" onclick="answerQuiz(${o.v})">${o.l}</button>`).join('')}
+    </div>
+    <p style="font-size:11px;color:var(--w30);text-align:center;margin-top:26px">Tap an answer to continue — no wrong answers</p>
+  </div>`;
+},
+
+result(){ const st=defStage(); return `
+  <div style="padding:32px 24px 24px;flex:1;max-width:520px;width:100%;margin:0 auto;display:flex;flex-direction:column">
+    <div class="pop-in" style="display:flex;flex-direction:column;align-items:center;margin-bottom:24px">
+      <div style="width:64px;height:64px;border-radius:50%;background:rgba(200,146,42,0.1);border:1.5px solid rgba(200,146,42,0.3);display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:14px">${st.emoji}</div>
+      <p class="eyebrow" style="margin-bottom:6px">YOU ARE AT</p>
+      <h1 class="serif" style="font-size:clamp(34px,7vw,42px);font-weight:400;color:var(--w100);margin-bottom:6px">${st.label}</h1>
+      <p style="font-size:14px;color:var(--w50);text-align:center;line-height:1.6;max-width:300px">${st.desc}</p>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <div style="width:6px;height:6px;border-radius:50%;background:var(--gold2);animation:pulse 1.6s infinite"></div>
+      <p class="eyebrow">YOUR FIRST PROMPT — READY</p>
+    </div>
+    <p style="font-size:14px;color:var(--w70);margin-bottom:14px;line-height:1.55">Your next move: <strong style="color:var(--w100);font-weight:600">${st.firstMove}.</strong> Here's the exact prompt to do it:</p>
+
+    <div class="prompt-box" style="margin-bottom:16px">
+      <p class="prompt-text" id="firstText"><span class="cursor"></span></p>
+    </div>
+
+    <button id="copyFirstBtn" class="gold-btn" onclick="copyText('first','copyFirstBtn')" style="margin-bottom:8px">Copy prompt — use it in any AI</button>
+    <button class="quiet-btn" onclick="go('home')">Explore my full roadmap →</button>
+  </div>`;
+},
+
+home(){ const st=defStage(); return `
+  <div style="padding:24px 20px 12px;flex:1;width:100%">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px">
+      <span style="font-size:12px;font-weight:600;letter-spacing:0.26em;color:var(--w30)">NURJ</span>
+      <div style="display:flex;gap:6px">
+        <span class="chip">${st.emoji} ${st.label}</span>
+        ${S.tier!=='free'?`<span class="chip-grey">${S.tier==='builder'?'Builder':'Operator'}</span>`:''}
+      </div>
+    </div>
+
+    <div class="card" style="padding:24px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px">
+        <p class="eyebrow">TODAY'S ONE MOVE</p>
+        <span style="font-size:11px;color:var(--w30)">Stage ${st.num} of 4 · 38%</span>
+      </div>
+      <p class="serif" style="font-size:clamp(22px,5vw,27px);color:var(--w100);line-height:1.3;margin-bottom:8px">${st.actions[0]}</p>
+      <p style="font-size:13px;color:var(--w50);line-height:1.6;margin-bottom:18px">Do this one thing today. Everything else can wait.</p>
+      <button onclick="go('generate')" style="background:var(--gold);color:var(--bg);border-radius:var(--r-sm);padding:14px 22px;font-size:14px;font-weight:600;width:100%">⚡ Generate the prompt for this</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      <button onclick="go('enhance')" class="card" style="padding:18px;display:flex;flex-direction:column;align-items:flex-start;gap:7px;text-align:left">
+        <span style="font-size:22px">✦</span>
+        <span style="font-size:14px;color:var(--w100);font-weight:500">Fix a prompt</span>
+        <span style="font-size:12px;color:var(--w50);line-height:1.45">Paste anything weak, get it rewritten</span>
+      </button>
+      <button onclick="go('guides')" class="card" style="padding:18px;display:flex;flex-direction:column;align-items:flex-start;gap:7px;text-align:left">
+        <span style="font-size:22px">📖</span>
+        <span style="font-size:14px;color:var(--w100);font-weight:500">Guides</span>
+        <span style="font-size:12px;color:var(--w50);line-height:1.45">Matched to your ${st.label} stage</span>
+      </button>
+    </div>
+
+    <div class="card" style="margin-bottom:18px">
+      <p class="eyebrow" style="padding:18px 20px 8px">THEN, THIS WEEK</p>
+      ${st.actions.slice(1).map((a,i)=>`
+        <div style="display:flex;gap:14px;padding:14px 20px;${i===0?'border-bottom:1px solid var(--w06);':''}align-items:flex-start">
+          <div style="width:19px;height:19px;border-radius:5px;border:1.5px solid var(--w15);flex-shrink:0;margin-top:1px"></div>
+          <span style="font-size:14px;color:var(--w70);line-height:1.55">${a}</span>
+        </div>`).join('')}
+      <div style="height:10px"></div>
+    </div>
+  </div>`;
+},
+
+generate(){
+  let body='';
+  const overLimit = S.tier==='free' && left()===0 && S.genStep!=='result';
+  const activeStep = S.genLoading ? 3 : S.genStep==='cat' ? 1 : S.genStep==='goal' ? 2 : 3;
+
+  if(overLimit){
+    body = `<div class="upsell">
+      <p class="h">You've used today's 5 prompts</p>
+      <p class="p">That's real momentum. Builder gives you unlimited — every category, every day.</p>
+      <button onclick="go('upgrade')">Go unlimited — ₦3,500/mo</button>
+    </div>`;
+  }
+  else if(S.genLoading){
+    body = `
+    <div style="padding:8px 0">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+        <div class="spinner" style="width:18px;height:18px"></div>
+        <p style="font-size:14px;color:var(--w70)">Writing your prompt<span style="color:var(--gold2)">…</span></p>
+      </div>
+      <div class="skeleton" style="height:14px;width:90%;margin-bottom:11px"></div>
+      <div class="skeleton" style="height:14px;width:100%;margin-bottom:11px"></div>
+      <div class="skeleton" style="height:14px;width:75%;margin-bottom:11px"></div>
+      <div class="skeleton" style="height:14px;width:95%;margin-bottom:11px"></div>
+      <div class="skeleton" style="height:14px;width:60%"></div>
+      <p style="font-size:12px;color:var(--w30);margin-top:18px">Adding Nigerian market context — ₦ pricing, local platforms, Lagos dynamics</p>
+    </div>`;
+  }
+  else if(S.genStep==='cat'){
+    body = `<p style="font-size:14px;color:var(--w70);margin-bottom:16px">What's your business?</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">
+      ${CATS.map(c=>`
+        <button class="opt ${S.cat&&S.cat.id===c.id?'sel':''}" style="flex-direction:column;gap:9px;justify-content:center;padding:20px 10px;min-height:96px" onclick="pickCat('${c.id}')">
+          <span style="font-size:26px">${c.icon}</span>
+          <span style="font-size:13px;font-weight:500;text-align:center;line-height:1.3">${c.label}</span>
+        </button>`).join('')}
+    </div>`;
+  }
+  else if(S.genStep==='goal' && S.cat){
+    body = `
+    <button onclick="backGen()" style="display:inline-flex;align-items:center;gap:8px;background:var(--surf);border:1px solid var(--w06);border-radius:20px;padding:7px 15px;margin-bottom:18px">
+      <span style="font-size:14px">${S.cat.icon}</span>
+      <span style="font-size:12px;color:var(--gold2)">${S.cat.label}</span>
+      <span style="font-size:11px;color:var(--w30)">change</span>
+    </button>
+    <p style="font-size:14px;color:var(--w70);margin-bottom:16px">What do you want to do?</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+      ${GOALS[S.cat.id].map((g,i)=>`<button class="opt ${S.goal===g?'sel':''}" onclick="pickGoal(${i})">${g}</button>`).join('')}
+    </div>
+    ${S.goal?`<button id="genGo" class="gold-btn" onclick="generate()">Write my prompt →</button>`:''}`;
+  }
+  else if(S.genStep==='result' && S.genOut){
+    body = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <div style="width:6px;height:6px;border-radius:50%;background:var(--gold2)"></div>
+      <p class="eyebrow">READY — BUILT WITH RCFC</p>
+    </div>
+    <div class="prompt-box" style="margin-bottom:16px">
+      <p class="prompt-text" id="genText">${esc(S.genOut)}</p>
+    </div>
+    <button id="copyGenBtn" class="gold-btn" onclick="copyText('gen','copyGenBtn')" style="margin-bottom:10px">Copy — use it in any AI</button>
+    <div style="display:flex;gap:10px;margin-bottom:8px">
+      <button onclick="go('enhance')" style="flex:1;background:var(--surf);color:var(--w50);border:1px solid var(--w15);border-radius:var(--r-sm);padding:13px;font-size:13px">✦ Refine it</button>
+      ${S.tier!=='free'?`<button style="flex:1;background:var(--surf);color:var(--w50);border:1px solid var(--w15);border-radius:var(--r-sm);padding:13px;font-size:13px">Save</button>`:''}
+      <button onclick="resetGen()" style="flex:1;background:var(--surf);color:var(--w50);border:1px solid var(--w15);border-radius:var(--r-sm);padding:13px;font-size:13px">New prompt</button>
+    </div>
+    ${S.tier==='free'?`<p style="font-size:11px;color:var(--w30);text-align:center;padding-top:4px">${left()} of 5 left today</p>`:''}`;
+  }
+
+  return `<div style="padding:24px 20px 16px;flex:1;width:100%">
+    <h2 style="font-size:18px;font-weight:600;color:var(--w100);margin-bottom:18px">Prompt Generator</h2>
+    ${!overLimit?stepper(activeStep):''}
+    ${body}
+  </div>`;
+},
+
+enhance(){
+  let out='';
+  if(S.enhLoading){
+    out = `
+    <div style="padding:4px 0">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <div class="spinner" style="width:16px;height:16px"></div>
+        <p style="font-size:14px;color:var(--w70)">Rebuilding with RCFC…</p>
+      </div>
+      <div class="skeleton" style="height:13px;width:85%;margin-bottom:10px"></div>
+      <div class="skeleton" style="height:13px;width:100%;margin-bottom:10px"></div>
+      <div class="skeleton" style="height:13px;width:70%"></div>
+    </div>`;
+  }
+  else if(S.enhOut){
+    const blur = isBlurred();
+    out = `<div class="slide-in">
+      <div style="background:rgba(163,45,45,0.07);border:1px solid rgba(163,45,45,0.16);border-radius:var(--r-md);padding:16px;margin-bottom:12px">
+        <p style="font-size:10px;font-weight:600;color:#E89090;margin-bottom:9px;letter-spacing:0.1em">BEFORE</p>
+        <p style="font-size:13px;color:var(--w50);line-height:1.7;font-style:italic">${esc(S.enhOut.before)}</p>
+      </div>
+      <div style="position:relative;margin-bottom:12px">
+        <div style="background:rgba(59,109,17,0.06);border:1px solid rgba(151,196,89,0.2);border-radius:var(--r-md);padding:16px">
+          <p style="font-size:10px;font-weight:600;color:var(--green);margin-bottom:9px;letter-spacing:0.1em">AFTER — RCFC</p>
+          <p style="font-size:13px;color:${blur?'transparent':'var(--w70)'};line-height:1.85;white-space:pre-wrap;${blur?'filter:blur(4px);user-select:none;':''}">${esc(S.enhOut.after)}</p>
+        </div>
+        ${blur?`<div style="position:absolute;inset:0;background:rgba(12,11,9,0.9);border-radius:var(--r-md);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px">
+          <p style="font-size:16px;color:var(--gold2);font-weight:600;margin-bottom:6px;text-align:center">It's ready — and it's good</p>
+          <p style="font-size:13px;color:var(--w50);margin-bottom:18px;text-align:center;line-height:1.6;max-width:300px">Your rewritten prompt is behind this blur. Builder unlocks it, plus unlimited rewrites.</p>
+          <button onclick="go('upgrade')" style="background:var(--gold);color:var(--bg);border-radius:var(--r-sm);padding:13px 26px;font-size:14px;font-weight:600">Unlock — ₦3,500/mo</button>
+        </div>`:''}
+      </div>
+      ${!blur?`
+      <div class="card" style="padding:16px;margin-bottom:14px">
+        <p style="font-size:10px;color:var(--w30);margin-bottom:7px;letter-spacing:0.1em">WHAT CHANGED</p>
+        <p style="font-size:13px;color:var(--w50);line-height:1.7">${S.enhOut.why}</p>
+      </div>
+      <button id="copyEnhBtn" class="gold-btn" onclick="copyText('enh','copyEnhBtn')">Copy enhanced prompt</button>`:''}
+    </div>`;
+  }
+
+  return `<div style="padding:24px 20px 16px;flex:1;width:100%">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+      <h2 style="font-size:18px;font-weight:600;color:var(--w100)">Prompt Enhancer</h2>
+      ${S.tier==='free'?`<span style="font-size:11px;color:${S.eCount>=3?'var(--gold2)':'var(--w30)'}">${eLeft()} left today</span>`:''}
+    </div>
+    <p style="font-size:14px;color:var(--w50);margin-bottom:18px;line-height:1.6">Paste anything weak. Watch it get rebuilt.</p>
+    <textarea id="enhInput" placeholder='Try: "Write me a DM about my design services"' style="width:100%;background:var(--surf);border:1px solid var(--w06);border-radius:var(--r-md);padding:16px;font-size:14px;color:var(--w70);min-height:100px;resize:vertical;outline:none;line-height:1.7"></textarea>
+    <div style="height:12px"></div>
+    <button id="enhBtn" class="gold-btn" onclick="enhance()" ${!S.enhIn.trim()||S.enhLoading?'disabled':''}>${S.enhLoading?'Rebuilding…':'✦ Enhance it'}</button>
+    <div style="height:18px"></div>
+    ${out}
+  </div>`;
+},
+
+guides(){
+  return `<div style="padding:24px 20px 16px;flex:1;width:100%">
+    <h2 style="font-size:18px;font-weight:600;color:var(--w100);margin-bottom:6px">Guides</h2>
+    <p style="font-size:14px;color:var(--w50);margin-bottom:18px">Matched to your stage — no noise</p>
+    <div style="display:flex;gap:8px;margin-bottom:18px;overflow-x:auto;padding-bottom:2px">
+      ${[['validation','Validate'],['launch','Launch'],['scaling','Scale'],['exit','Exit 9-5']].map(([k,l])=>`
+        <button onclick="setGuideTab('${k}')" style="background:${S.guideTab===k?'var(--gold)':'var(--surf)'};color:${S.guideTab===k?'var(--bg)':'var(--w50)'};border:1px solid ${S.guideTab===k?'var(--gold)':'var(--w06)'};border-radius:20px;padding:7px 17px;font-size:13px;font-weight:${S.guideTab===k?600:400};white-space:nowrap">${l}</button>`).join('')}
+    </div>
+    ${GUIDES.map(g=>{
+      const lockedNow = g.locked && S.tier==='free';
+      return `<div class="card" style="padding:18px;margin-bottom:12px;${lockedNow?'':'border-color:rgba(200,146,42,0.14)'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px">
+          <p style="font-size:15px;font-weight:500;color:${lockedNow?'var(--w70)':'var(--w100)'};line-height:1.4">${g.title}</p>
+          ${lockedNow?'<span style="font-size:14px;color:var(--w30);flex-shrink:0">🔒</span>'
+            :`<span class="chip" style="flex-shrink:0;font-size:10px">${g.locked?'Builder':'Free'}</span>`}
+        </div>
+        <p style="font-size:13px;color:var(--w50);line-height:1.6;${lockedNow?'margin-bottom:14px;':''}">${g.desc}</p>
+        ${lockedNow
+          ?`<button onclick="go('upgrade')" style="background:rgba(200,146,42,0.06);color:var(--gold2);border:1px solid rgba(200,146,42,0.16);border-radius:var(--r-sm);padding:9px 17px;font-size:13px;font-weight:500">Unlock →</button>`
+          :`<button style="background:none;color:var(--gold);font-size:13px;padding:6px 0 0;font-weight:500">Read →</button>`}
+      </div>`;}).join('')}
+    ${S.tier==='free'?`
+    <div class="upsell" style="margin-top:10px;margin-bottom:18px">
+      <p class="h">4 more guides for your stage</p>
+      <p class="p">Every template, checklist, and script. Builder unlocks the full library.</p>
+      <button onclick="go('upgrade')">Unlock all — ₦3,500/mo</button>
+    </div>`:''}
+  </div>`;
+},
+
+upgrade(){
+  if(S.paid){
+    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:32px;min-height:70vh">
+      <div class="pop-in" style="width:68px;height:68px;border-radius:50%;background:rgba(39,80,10,0.2);border:1.5px solid rgba(151,196,89,0.4);display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:20px;color:var(--green)">✓</div>
+      <h2 class="serif" style="font-size:clamp(30px,6vw,38px);font-weight:400;color:var(--w100);margin-bottom:10px;text-align:center">You're a ${S.planSel==='builder'?'Builder':'Operator'} now</h2>
+      <p style="font-size:14px;color:var(--w50);text-align:center;margin-bottom:32px;line-height:1.7;max-width:280px">Everything's unlocked. Go make something happen.</p>
+      <button onclick="go('home')" style="background:var(--gold);color:var(--bg);border-radius:var(--r-md);padding:16px 36px;font-size:15px;font-weight:600">Back to my roadmap →</button>
+    </div>`;
+  }
+  const plans = [
+    {id:'builder',name:'Builder',price:'₦3,500',period:'/mo',annual:'or ₦30,000/year — save 29%',pop:true,features:['Unlimited prompts, every category','Unlimited prompt rewrites','Every guide, template &amp; checklist','Save your best prompts','Full stage roadmap']},
+    {id:'operator',name:'Operator',price:'₦7,500',period:'/mo',annual:'or ₦65,000/year',pop:false,features:['Everything in Builder','Monthly niche prompt packs','Monthly group coaching call','Early feature access']}
+  ];
+  return `<div style="padding:24px 20px 24px;flex:1;width:100%;max-width:480px;margin:0 auto">
+    <button onclick="go('home')" style="background:none;color:var(--w50);font-size:13px;margin-bottom:18px;padding:0">← Back</button>
+    <h2 class="serif" style="font-size:clamp(30px,6vw,36px);font-weight:400;color:var(--w100);margin-bottom:8px">Go unlimited</h2>
+    <p style="font-size:14px;color:var(--w50);margin-bottom:22px;line-height:1.6">Less than one Uber ride a month.</p>
+    ${plans.map(p=>`
+      <button onclick="pickPlan('${p.id}')" style="width:100%;background:${S.planSel===p.id?'rgba(200,146,42,0.06)':'var(--surf)'};border:1.5px solid ${S.planSel===p.id?'var(--gold)':'var(--w06)'};border-radius:var(--r-lg);padding:20px;margin-bottom:12px;text-align:left;display:block;position:relative">
+        ${p.pop?`<span style="position:absolute;top:-9px;left:18px;background:var(--gold);color:var(--bg);font-size:9px;font-weight:700;letter-spacing:0.08em;padding:3px 11px;border-radius:10px">MOST POPULAR</span>`:''}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+          <div>
+            <p style="font-size:16px;font-weight:600;color:var(--w100);margin-bottom:4px">${p.name}</p>
+            <p style="font-size:26px;font-weight:700;color:${S.planSel===p.id?'var(--gold2)':'var(--w70)'};line-height:1;font-variant-numeric:tabular-nums">${p.price}<span style="font-size:14px;font-weight:400;color:var(--w30)">${p.period}</span></p>
+            <p style="font-size:11px;color:var(--w30);margin-top:4px">${p.annual}</p>
+          </div>
+          <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${S.planSel===p.id?'var(--gold)':'var(--w30)'};background:${S.planSel===p.id?'var(--gold)':'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s">
+            ${S.planSel===p.id?'<div style="width:8px;height:8px;border-radius:50%;background:var(--bg)"></div>':''}
+          </div>
+        </div>
+        ${p.features.map(f=>`
+          <div style="display:flex;gap:9px;padding:3px 0;align-items:flex-start">
+            <span style="font-size:10px;color:var(--gold);margin-top:3px;flex-shrink:0">✓</span>
+            <span style="font-size:13px;color:var(--w70);line-height:1.5">${f}</span>
+          </div>`).join('')}
+      </button>`).join('')}
+    <button onclick="pay()" ${S.paying?'disabled':''} class="gold-btn" style="margin-top:6px;margin-bottom:14px">
+      ${S.paying
+        ?'<span style="display:inline-flex;align-items:center;gap:10px"><span class="spinner" style="width:14px;height:14px;display:inline-block"></span>Processing with Paystack…</span>'
+        :`Pay with Paystack — ${S.planSel==='builder'?'₦3,500':'₦7,500'}`}
+    </button>
+    <div style="display:flex;justify-content:center;gap:16px">
+      ${['7-day refund','Cancel anytime','Paystack secured'].map(t=>`
+        <span style="font-size:11px;color:var(--w30);display:flex;align-items:center;gap:4px"><span style="color:var(--gold);font-size:9px">✓</span>${t}</span>`).join('')}
+    </div>
+  </div>`;
+}
+};
+
+render();
+</script>
+</body>
+</html>
