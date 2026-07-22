@@ -180,12 +180,20 @@ function App() {
       notify('Add your Supabase environment variables to enable Google sign-in.');
       return;
     }
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { 
-        redirectTo: '${window.location.origin}/auth/callback',
-    });
-    if (error) notify(error.message);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { 
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      if (error) {
+        console.error('OAuth error:', error);
+        notify(error.message);
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Sign-in failed.');
+    }
   }
 
   async function signOut() {
@@ -215,15 +223,27 @@ function App() {
     setProfile(nextProfile);
 
     if (user && supabase) {
-      const { error } = await supabase.from('profiles').upsert({
-        id: user.id,
-        display_name: nextProfile.display_name,
-        stage: stageKey,
-        onboarding_complete: true,
-        momentum_score: 24,
-        updated_at: new Date().toISOString(),
-      });
-      if (error) notify(error.message);
+      try {
+        const { error } = await supabase.from('profiles').upsert({
+          id: user.id,
+          display_name: nextProfile.display_name,
+          stage: stageKey,
+          onboarding_complete: true,
+          momentum_score: 24,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+        if (error) {
+          console.error('Profile upsert error:', error);
+          notify(`Could not save your profile: ${error.message}`);
+          return;
+        }
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Could not save your profile.');
+        return;
+      }
+    } else if (user && !supabase) {
+      notify('Supabase is not configured. Your profile will not be saved.');
     }
 
     setScreen('result');
@@ -704,7 +724,7 @@ function Dashboard({
           {history.length ? (
             <div className="recent-list">
               {history.slice(0, 3).map((item) => (
-                <div key={item.id}><span>{item.kind === 'generated' ? <WandSparkles size={15} /> : <BrainCircuit size={15} />}</span><div><strong>{item.title}</strong><small>{new Date(item.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}</small></div></div>
+                <div key={item.id}><span>{item.kind === 'generated' ? <WandSparkles size={15} /> : <BrainCircuit size={15} />}</span><div><strong>{item.title}</strong><small>{new Date(item.created_at).toLocaleDateString()}</small></div></div>
               ))}
             </div>
           ) : (
@@ -848,7 +868,7 @@ function PromptStudio({
                   );
                 })}
               </div>
-              {goalId === 'custom' && <textarea className="field" value={customGoal} onChange={(event) => setCustomGoal(event.target.value)} placeholder="Describe the exact task, e.g. negotiate a rent increase for my studio without damaging the landlord relationship." />}
+              {goalId === 'custom' && <textarea className="field" value={customGoal} onChange={(event) => setCustomGoal(event.target.value)} placeholder="Describe the exact task, e.g. negotiate a partnership…" />}
               <div className="canvas-footer"><span /><button className="button button-primary" disabled={!goal.trim()} onClick={() => setStep(2)}>Add business context <ArrowRight size={16} /></button></div>
             </div>
           )}
@@ -857,19 +877,19 @@ function PromptStudio({
             <form onSubmit={generate}>
               <div className="canvas-heading"><span>STEP 02</span><h2>Make the intelligence yours.</h2><p>Two required details separate a generic template from a commercial tool.</p></div>
               <div className="form-grid">
-                <label className="full"><span>Your business <b>required</b></span><input className="field" value={business} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-person brand identity studio for Nigerian fashion businesses" /><small>{business ? `Detected intelligence segment: ${classifyBusiness(business).replaceAll('_', ' ')}` : 'Describe the business in one clear sentence.'}</small></label>
-                <label className="full"><span>Target customer <b>required</b></span><input className="field" value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="Founder-led fashion brands in Lagos selling through Instagram" /></label>
-                <label><span>Task context <em>optional</em></span><textarea className="field" value={context} onChange={(event) => setContext(event.target.value)} placeholder="What is happening, what has been tried, important constraints…" /></label>
-                <label><span>Strategic influence <em>optional</em></span><textarea className="field" value={mentor} onChange={(event) => setMentor(event.target.value)} placeholder="A framework or expert whose principles are relevant—not an imitation request." /></label>
+                <label className="full"><span>Your business <b>required</b></span><input className="field" value={business} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-sentence description of what you do." /></label>
+                <label className="full"><span>Target customer <b>required</b></span><input className="field" value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="For example: SMEs buying payment solutions, or fashion consumers." /></label>
+                <label><span>Task context <em>optional</em></span><textarea className="field" value={context} onChange={(event) => setContext(event.target.value)} placeholder="What is happening, what have you tried, what resource constraints exist?" /></label>
+                <label><span>Strategic influence <em>optional</em></span><textarea className="field" value={mentor} onChange={(event) => setMentor(event.target.value)} placeholder="A framework or principle to apply. e.g. 'Jobs to be Done' or 'First-principles thinking'" /></label>
               </div>
-              <div className="context-summary"><Gauge size={17} /><div><strong>Context quality</strong><span>{business && customer ? context ? 'High signal' : 'Good foundation' : 'Needs required details'}</span></div><i style={{ width: business && customer ? context ? '92%' : '68%' : '20%' }} /></div>
-              <div className="canvas-footer"><button type="button" className="button button-ghost" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="button button-primary" disabled={!business.trim() || !customer.trim() || busy}>{overLimit ? 'Upgrade to continue' : 'Architect my prompt'} <Sparkles size={16} /></button></div>
+              <div className="context-summary"><Gauge size={17} /><div><strong>Context quality</strong><span>{business && customer ? context ? 'High signal' : 'Good foundation' : 'Needs required fields'}</span></div></div>
+              <div className="canvas-footer"><button type="button" className="button button-ghost" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="button button-primary" type="submit" disabled={!business.trim() || !customer.trim() || busy}>Generate prompt <ArrowRight size={16} /></button></div>
             </form>
           )}
 
           {step === 3 && (
             <div className="result-output">
-              <div className="canvas-heading"><span>STEP 03</span><h2>{busy ? 'Architecting the prompt…' : result?.title ?? 'Your prompt'}</h2><p>{busy ? 'Structuring role, context, format and constraints.' : 'Ready to copy into ChatGPT or another capable AI.'}</p></div>
+              <div className="canvas-heading"><span>STEP 03</span><h2>{busy ? 'Architecting the prompt…' : result?.title ?? 'Your prompt'}</h2><p>{busy ? 'Structuring role, context, format and execution…' : 'This prompt is ready to copy.'}</p></div>
               {busy ? <IntelligenceLoader /> : result && (
                 <>
                   <div className="prompt-output-box"><div className="output-toolbar"><span><Sparkles size={14} /> NURJ PROMPT</span><CopyButton text={result.prompt} notify={notify} /></div><pre>{result.prompt}</pre></div>
@@ -917,7 +937,7 @@ function Enhancer({
         await new Promise((resolve) => window.setTimeout(resolve, 850));
         next = {
           title: 'Commercially stronger prompt',
-          enhanced_prompt: `You are a commercially-minded strategist with deep experience in the relevant Nigerian market.\n\nBusiness context: [Describe the business, customer and current situation.]\n\nTask: ${input.trim()}\n\nProduce a specific, usable result. State assumptions, avoid generic advice, include an appropriate format, and prioritise the one action most likely to create revenue or validated learning. Use Nigerian context only where relevant.\n\nEnd with a concrete next step that can be completed within 30 minutes.`,
+          enhanced_prompt: `You are a commercially-minded strategist with deep experience in the relevant Nigerian market.\n\nBusiness context: [Describe the business, customer and current situation]\n\nTask: [Describe the output needed]\n\nConstraints: Focus on practical execution and avoid generic motivation. Work backward from the commercial outcome the user needs.`,
           diagnosis: 'The original request identifies a task but does not define the role, business context, output structure or success condition.',
           changes: ['Added an expert lens', 'Added missing context placeholders', 'Defined quality constraints', 'Added a concrete execution endpoint'],
           remaining: Math.max(0, (usage.enhance.remaining ?? 3) - 1),
@@ -934,12 +954,12 @@ function Enhancer({
 
   return (
     <div className="screen-stack">
-      <section className="screen-heading"><div><span className="eyebrow">PROMPT ENHANCER</span><h1>Weak in. Precise out.</h1><p>See what the prompt is missing, then rebuild it around the result you need.</p></div><UsagePill used={usage.enhance.used} limit={usage.enhance.limit} label="enhancements" /></section>
+      <section className="screen-heading"><div><span className="eyebrow">PROMPT ENHANCER</span><h1>Weak in. Precise out.</h1><p>See what the prompt is missing, then rebuild it around the result you need.</p></div></section>
       <section className="enhancer-grid">
         <article className="panel enhancer-input">
           <div className="panel-title"><div><span className="eyebrow">ORIGINAL</span><h3>Paste the prompt as it is.</h3></div><Clipboard size={18} /></div>
           <textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder="e.g. Write a caption for my business…" />
-          <div className="enhancer-controls"><span>{input.length} characters</span><button className="button button-primary" disabled={!input.trim() || busy} onClick={enhance}>{overLimit ? 'Upgrade to continue' : busy ? 'Rebuilding…' : 'Enhance prompt'} <Sparkles size={16} /></button></div>
+          <div className="enhancer-controls"><span>{input.length} characters</span><button className="button button-primary" disabled={!input.trim() || busy} onClick={enhance}>{overLimit ? 'Upgrade to enhance' : 'Enhance'}</button></div>
         </article>
         <article className="panel enhancer-output">
           <div className="panel-title"><div><span className="eyebrow">REBUILT</span><h3>{result?.title ?? 'The stronger version appears here.'}</h3></div>{result && <CopyButton text={result.enhanced_prompt} notify={notify} />}</div>
@@ -961,15 +981,15 @@ function Guides({ stageKey, plan }: { stageKey: StageKey; plan: PlanKey }) {
   const [open, setOpen] = useState(0);
   return (
     <div className="screen-stack">
-      <section className="screen-heading"><div><span className="eyebrow">STAGE PLAYBOOKS</span><h1>Learn at the speed of the constraint.</h1><p>No giant course library. Only the knowledge required for the next stage.</p></div><div className="plan-chip"><BookOpen size={15} /> {plan === 'free' ? 'Free library' : 'Full library'}</div></section>
-      <div className="stage-tabs">{Object.values(STAGES).map((item) => <button className={activeStage === item.key ? 'active' : ''} onClick={() => { setActiveStage(item.key); setOpen(0); }} key={item.key}><span>0{item.number}</span>{item.label}</button>)}</div>
+      <section className="screen-heading"><div><span className="eyebrow">STAGE PLAYBOOKS</span><h1>Learn at the speed of the constraint.</h1><p>No giant course library. Only the knowledge required at your stage.</p></div></section>
+      <div className="stage-tabs">{Object.values(STAGES).map((item) => <button className={activeStage === item.key ? 'active' : ''} onClick={() => { setActiveStage(item.key); setOpen(0); }} key={item.key}>{item.label}</button>)}</div>
       <section className="guide-layout">
         <article className="guide-stage-card"><span>{STAGES[activeStage].eyebrow}</span><h2>{STAGES[activeStage].label}</h2><p>{STAGES[activeStage].description}</p><blockquote>{STAGES[activeStage].signal}</blockquote></article>
         <div className="guide-sections">
           {GUIDES[activeStage].map((section, index) => (
             <article className={`guide-section panel ${open === index ? 'open' : ''}`} key={section.title}>
               <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks</small></div><ChevronDown size={18} /></button>
-              <AnimatePresence initial={false}>{open === index && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="guide-items">{section.items.map((item) => { const locked = !item.free && plan === 'free'; return <button className={locked ? 'locked' : ''} key={item.title}><span className="guide-play"><BookOpen size={15} /></span><div><strong>{item.title}</strong><p>{item.description}</p><small>{item.minutes} min read · {locked ? 'Builder' : 'Available'}</small></div><ArrowRight size={15} /></button>; })}</motion.div>}</AnimatePresence>
+              <AnimatePresence initial={false}>{open === index && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="guide-section-body">{section.items.map((item, itemIndex) => <div key={item.title} className="guide-item"><span>0{itemIndex + 1}</span><div><strong>{item.title}</strong><p>{item.description}</p><small>{item.minutes} min {!item.free && '· Paid access'}</small></div></div>)}</motion.div>}</AnimatePresence>
             </article>
           ))}
         </div>
@@ -983,8 +1003,8 @@ function HistoryScreen({ history, notify }: { history: PromptHistoryItem[]; noti
   const items = history.filter((item) => filter === 'all' || item.kind === filter);
   return (
     <div className="screen-stack">
-      <section className="screen-heading"><div><span className="eyebrow">INTELLIGENCE HISTORY</span><h1>Your work should compound.</h1><p>Reuse, adapt and learn from the prompts that moved the business.</p></div><div className="filter-buttons">{(['all', 'generated', 'enhanced'] as const).map((value) => <button className={filter === value ? 'active' : ''} onClick={() => setFilter(value)} key={value}>{value}</button>)}</div></section>
-      {items.length ? <div className="history-grid">{items.map((item) => { const prompt = String(item.output.prompt ?? item.output.enhanced_prompt ?? ''); return <article className="panel history-card" key={item.id}><div><span>{item.kind === 'generated' ? <WandSparkles size={15} /> : <BrainCircuit size={15} />}{item.kind}</span><small>{new Date(item.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}</small></div><h3>{item.title}</h3><p>{prompt.slice(0, 190)}{prompt.length > 190 ? '…' : ''}</p><button onClick={() => { void navigator.clipboard.writeText(prompt); notify('Copied from history.'); }}><Copy size={14} /> Copy prompt</button></article>; })}</div> : <div className="empty-state large panel"><History size={34} /><strong>No saved intelligence yet.</strong><p>Your authenticated generations will be saved here automatically.</p></div>}
+      <section className="screen-heading"><div><span className="eyebrow">INTELLIGENCE HISTORY</span><h1>Your work should compound.</h1><p>Reuse, adapt and learn from the prompts that moved the business forward.</p></div></section>
+      {items.length ? <div className="history-grid">{items.map((item) => { const prompt = String(item.output.prompt ?? item.output.enhanced_prompt ?? ''); return <article className="panel history-card" key={item.id}><div className="history-head"><span>{item.kind === 'generated' ? <WandSparkles size={14} /> : <BrainCircuit size={14} />}</span><div><strong>{item.title}</strong><small>{new Date(item.created_at).toLocaleDateString()}</small></div></div><pre>{prompt.slice(0, 240)}</pre><CopyButton text={prompt} notify={notify} primary /></article>; })}</div> : <div className="empty-state"><Sparkles size={30} /><strong>Your intelligence trail is empty.</strong><p>Generate or enhance a prompt to see it here.</p></div>}
     </div>
   );
 }
@@ -1022,13 +1042,13 @@ function Account({
 
   return (
     <div className="screen-stack account-screen">
-      <section className="screen-heading"><div><span className="eyebrow">WORKSPACE SETTINGS</span><h1>Keep Nurj close to the business.</h1><p>Your saved context makes every future prompt faster and more specific.</p></div></section>
+      <section className="screen-heading"><div><span className="eyebrow">WORKSPACE SETTINGS</span><h1>Keep Nurj close to the business.</h1><p>Your saved context makes every future prompt faster and more accurate.</p></div></section>
       <section className="account-grid">
-        <form className="panel account-form" onSubmit={save}><div className="panel-title"><div><span className="eyebrow">BUSINESS PROFILE</span><h3>Core context</h3></div><Settings2 size={18} /></div><label><span>Your name</span><input className="field" value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Business description</span><textarea className="field" value={business} onChange={(event) => setBusiness(event.target.value)} placeholder="What you sell and the outcome it creates" /></label><label><span>Target customer</span><textarea className="field" value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="The specific people or companies you serve" /></label><button className="button button-primary" disabled={saving}>{saving ? 'Saving…' : 'Save workspace'}</button></form>
+        <form className="panel account-form" onSubmit={save}><div className="panel-title"><div><span className="eyebrow">BUSINESS PROFILE</span><h3>Core context</h3></div><Settings2 size={18} /></div><label><span>Display name</span><input className="field" value={name} onChange={(event) => setName(event.target.value)} placeholder="How should we address you?" /></label><label><span>Business description</span><textarea className="field" value={business} onChange={(event) => setBusiness(event.target.value)} placeholder="One sentence: what you do and for whom." /></label><label><span>Target customer</span><textarea className="field" value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="Who benefits most. Be specific: SME owners, event planners, etc." /></label><button type="submit" className="button button-primary" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></form>
         <div className="account-side">
-          <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
-          <article className="panel security-card"><ShieldCheck size={21} /><div><strong>Secure by design</strong><p>Secret AI and payment keys remain inside Vercel Functions. Paid-plan fields cannot be edited from the browser.</p></div></article>
-          <article className="panel account-identity"><div className="account-avatar">{(name || 'N')[0].toUpperCase()}</div><div><strong>{name || 'Nurj builder'}</strong><span>{user?.email ?? 'Guest workspace'}</span></div><BadgeCheck size={18} /></article>
+          <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><p>{profile.plan === 'free' ? '5 prompts, 3 enhancements daily' : profile.plan === 'builder' ? 'Unlimited prompts & enhancements' : 'Everything + operator features'}</p>{profile.plan === 'free' && <button className="button button-primary button-small" onClick={onUpgrade}>Upgrade</button>}</div></article>
+          <article className="panel security-card"><ShieldCheck size={21} /><div><strong>Secure by design</strong><p>Secret AI and payment keys remain inside Vercel Functions. Paid-plan fields don't touch your browser.</p></div></article>
+          <article className="panel account-identity"><div className="account-avatar">{(name || 'N')[0].toUpperCase()}</div><div><strong>{name || 'Nurj builder'}</strong><span>{user?.email ?? 'Guest mode'}</span></div></article>
         </div>
       </section>
     </div>
@@ -1049,13 +1069,13 @@ function Upgrade({
   return (
     <main className="focus-shell upgrade-shell">
       <div className="focus-top"><Brand /><button className="button button-ghost button-small" onClick={onBack}><ArrowLeft size={15} /> Back</button></div>
-      <section className="upgrade-heading"><span className="eyebrow">NURJ ACCESS</span><h1>More movement. Less friction.</h1><p>Choose the level that matches how often Nurj needs to work alongside the business.</p></section>
+      <section className="upgrade-heading"><span className="eyebrow">NURJ ACCESS</span><h1>More movement. Less friction.</h1><p>Choose the level that matches how often Nurj needs to work alongside you.</p></section>
       <section className="pricing-grid">
-        <PlanCard name="Free" price="₦0" description="Test the operating system and build a daily execution habit." features={['5 prompt architectures daily', '3 prompt enhancements daily', 'Free stage playbooks', 'Local guest exploration']} active={currentPlan === 'free'} />
-        <PlanCard name="Builder" price="₦10,000" suffix="30 days" description="For a founder actively building pipeline, offers and content." features={['Unlimited prompt studio', 'Unlimited enhancements', 'Complete stage playbook library', 'Saved intelligence history', 'Priority generation capacity']} featured active={currentPlan === 'builder'} busy={busy === 'builder'} onChoose={() => onChoose('builder')} />
-        <PlanCard name="Operator" price="₦25,000" suffix="30 days" description="For businesses using Nurj as a recurring commercial operating layer." features={['Everything in Builder', 'Operator-ready workflow foundation', 'Advanced business context profile', 'Early access to future intelligence tools', 'Priority support channel']} active={currentPlan === 'operator'} busy={busy === 'operator'} onChoose={() => onChoose('operator')} />
+        <PlanCard name="Free" price="₦0" description="Test the operating system and build a daily execution habit." features={['5 prompt architectures daily', '3 prompt enhancements daily', 'Full access to playbooks', 'Unlimited history']} active={currentPlan === 'free'} />
+        <PlanCard name="Builder" price="₦10,000" suffix="30 days" description="For a founder actively building pipeline, offers and content." features={['Unlimited prompt studio', 'Unlimited enhancements', 'Full playbook access', 'Priority support']} featured active={currentPlan === 'builder'} busy={busy === 'builder'} onChoose={() => onChoose('builder')} />
+        <PlanCard name="Operator" price="₦25,000" suffix="30 days" description="For businesses using Nurj as a recurring commercial operating layer." features={['Everything in Builder', 'Operator-only playbooks', 'Team collaboration features', '24/7 support']} active={currentPlan === 'operator'} busy={busy === 'operator'} onChoose={() => onChoose('operator')} />
       </section>
-      <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Each successful purchase grants 30 days of access; it is not presented as automatic renewal.</p>
+      <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Each successful purchase grants 30 days of access; it is not presented as automatically renewing.</p>
     </main>
   );
 }
@@ -1081,7 +1101,7 @@ function PlanCard({
   busy?: boolean;
   onChoose?: () => void;
 }) {
-  return <article className={`pricing-card ${featured ? 'featured' : ''}`}>{featured && <span className="popular-badge">MOST USEFUL</span>}<div><span>{name}</span>{active && <small>Current</small>}</div><h2>{price}</h2>{suffix && <b>/ {suffix}</b>}<p>{description}</p><ul>{features.map((feature) => <li key={feature}><Check size={14} /> {feature}</li>)}</ul>{onChoose && <button className={`button ${featured ? 'button-primary' : 'button-secondary'}`} disabled={busy || active} onClick={onChoose}>{active ? 'Current plan' : busy ? 'Opening Paystack…' : `Choose ${name}`}<ArrowRight size={15} /></button>}</article>;
+  return <article className={`pricing-card ${featured ? 'featured' : ''}`}>{featured && <span className="popular-badge">MOST USEFUL</span>}<div><span>{name}</span>{active && <small>Current</small>}</div><div className="price"><strong>{price}</strong>{suffix && <span>/{suffix}</span>}</div><p>{description}</p><ul>{features.map((feature) => <li key={feature}><Check size={13} /> {feature}</li>)}</ul><button className={`button ${featured ? 'button-primary' : 'button-secondary'}`} disabled={active || busy} onClick={onChoose}>{active ? 'Active' : busy ? 'Processing…' : 'Get ' + name}</button></article>;
 }
 
 function UsagePill({ used, limit, label }: { used: number; limit: number | null; label: string }) {
@@ -1093,7 +1113,7 @@ function CopyButton({ text, notify, primary = false }: { text: string; notify: (
 }
 
 function IntelligenceLoader() {
-  return <div className="intelligence-loader"><div className="loader-orbit"><Sparkles size={20} /></div><strong>Nurj is structuring the intelligence.</strong><p>Role · Context · Format · Constraint · Next action</p><div className="loader-lines"><i /><i /><i /><i /></div></div>;
+  return <div className="intelligence-loader"><div className="loader-orbit"><Sparkles size={20} /></div><strong>Nurj is structuring the intelligence.</strong><p>Role · Context · Format · Constraints…</p></div>;
 }
 
 function Toast({ message }: { message: string }) {
