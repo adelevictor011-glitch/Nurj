@@ -49,7 +49,7 @@ export async function POST(request: Request): Promise<Response> {
     const stage = assertText(body.stage, 'Stage', 30);
 
     const quota = await consumeQuota(supabase, user.id, 'prompt');
-    quotaConsumed = quota.plan === 'free';
+    quotaConsumed = true;
 
     const result = await createStructuredResponse<GeneratedPayload>({
       name: 'nurj_prompt_architecture',
