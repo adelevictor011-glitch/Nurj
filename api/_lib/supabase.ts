@@ -2,8 +2,13 @@ import { createClient } from '@supabase/supabase-js';
 import { env } from './env';
 
 export function adminClient() {
-  return createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  try {
+    return createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  } catch (error) {
+    throw new Error(
+      'Server Supabase configuration is missing. Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in environment variables.'
   });
 }
 
