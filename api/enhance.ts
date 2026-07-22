@@ -43,7 +43,7 @@ export async function POST(request: Request): Promise<Response> {
     const business = assertText(body.business, 'Business context', 800, false);
 
     const quota = await consumeQuota(supabase, user.id, 'enhance');
-    quotaConsumed = quota.plan === 'free';
+    quotaConsumed = true;
 
     const result = await createStructuredResponse<EnhancedPayload>({
       name: 'nurj_prompt_enhancement',
