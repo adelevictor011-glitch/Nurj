@@ -1,4 +1,4 @@
--- Nurj v2 production schema for Supabase
+edd-- Nurj v2 production schema for Supabase
 -- Run once in a new Supabase project's SQL editor.
 
 create extension if not exists pgcrypto;
