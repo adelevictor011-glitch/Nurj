@@ -14,7 +14,10 @@ const env = {
   get supabaseUrl() { return required('SUPABASE_URL'); },
   get supabaseServiceRoleKey() { return required('SUPABASE_SERVICE_ROLE_KEY'); },
   get openaiApiKey() { return required('OPENAI_API_KEY'); },
-  get openaiModel() { return process.env.OPENAI_MODEL || 'gpt-5-mini'; },
+  // Groq is OpenAI-compatible. Set OPENAI_BASE_URL to Groq's endpoint and
+  // OPENAI_API_KEY to a gsk_... key. Leave both unset to use real OpenAI.
+  get openaiBaseUrl() { return process.env.OPENAI_BASE_URL || undefined; },
+  get openaiModel() { return process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
   get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.
@@ -157,16 +160,21 @@ export async function POST(request: Request): Promise<Response> {
     const quota = await consumeQuota(supabase, user.id, 'prompt');
     quotaConsumed = quota.plan === 'free';
 
-    client ??= new OpenAI({ apiKey: env.openaiApiKey });
+    client ??= new OpenAI({ apiKey: env.openaiApiKey, baseURL: env.openaiBaseUrl });
     const model = env.openaiModel;
-    const response = await client.responses.create({
+    const response = await client.chat.completions.create({
       model,
-      instructions:
-        'You are executing a prompt written by a Nigerian founder inside their business tool. Produce the finished work product the prompt asks for — not advice about how to produce it, and not a restatement of the prompt. Be specific and commercially usable. Use naira, WhatsApp, Instagram and local market context only where it materially improves the output. State any assumption you had to make in one short line at the end.',
-      input: prompt,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are executing a prompt written by a Nigerian founder inside their business tool. Produce the finished work product the prompt asks for — not advice about how to produce it, and not a restatement of the prompt. Be specific and commercially usable. Use naira, WhatsApp, Instagram and local market context only where it materially improves the output. State any assumption you had to make in one short line at the end.',
+        },
+        { role: 'user', content: prompt },
+      ],
     });
 
-    const output = response.output_text?.trim();
+    const output = response.choices?.[0]?.message?.content?.trim();
     if (!output) throw new Error('The AI returned an empty response.');
 
     logModelUsage(supabase, {
@@ -174,8 +182,8 @@ export async function POST(request: Request): Promise<Response> {
       kind: 'generate',
       usage: {
         model,
-        inputTokens: response.usage?.input_tokens ?? 0,
-        outputTokens: response.usage?.output_tokens ?? 0,
+        inputTokens: response.usage?.prompt_tokens ?? 0,
+        outputTokens: response.usage?.completion_tokens ?? 0,
         totalTokens: response.usage?.total_tokens ?? 0,
       },
     });
