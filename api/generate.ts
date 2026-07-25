@@ -14,7 +14,10 @@ const env = {
   get supabaseUrl() { return required('SUPABASE_URL'); },
   get supabaseServiceRoleKey() { return required('SUPABASE_SERVICE_ROLE_KEY'); },
   get openaiApiKey() { return required('OPENAI_API_KEY'); },
-  get openaiModel() { return process.env.OPENAI_MODEL || 'gpt-5-mini'; },
+  // Groq is OpenAI-compatible. Set OPENAI_BASE_URL to Groq's endpoint and
+  // OPENAI_API_KEY to a gsk_... key. Leave both unset to use real OpenAI.
+  get openaiBaseUrl() { return process.env.OPENAI_BASE_URL || undefined; },
+  get openaiModel() { return process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
   get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.
@@ -133,7 +136,7 @@ function logModelUsage(
 let client: OpenAI | null = null;
 
 function openai() {
-  client ??= new OpenAI({ apiKey: env.openaiApiKey });
+  client ??= new OpenAI({ apiKey: env.openaiApiKey, baseURL: env.openaiBaseUrl });
   return client;
 }
 
@@ -149,28 +152,33 @@ async function createStructuredResponse<T>(params: {
   schema: Record<string, unknown>;
 }): Promise<StructuredResult<T>> {
   const model = env.openaiModel;
-  const response = await openai().responses.create({
+  // Chat Completions + JSON mode: OpenAI-compatible and works on Groq.
+  // The schema is described in the system message since Groq's JSON mode
+  // guarantees valid JSON but not a specific schema.
+  const response = await openai().chat.completions.create({
     model,
-    instructions: params.instructions,
-    input: params.input,
-    text: {
-      format: {
-        type: 'json_schema',
-        name: params.name,
-        strict: true,
-        schema: params.schema,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          params.instructions +
+          '\n\nRespond with a single valid JSON object and nothing else. It must match exactly this shape: ' +
+          JSON.stringify(params.schema),
       },
-    },
+      { role: 'user', content: params.input },
+    ],
   });
 
-  if (!response.output_text) throw new Error('The AI returned an empty response.');
+  const content = response.choices?.[0]?.message?.content;
+  if (!content) throw new Error('The AI returned an empty response.');
 
   return {
-    data: JSON.parse(response.output_text) as T,
+    data: JSON.parse(content) as T,
     usage: {
       model,
-      inputTokens: response.usage?.input_tokens ?? 0,
-      outputTokens: response.usage?.output_tokens ?? 0,
+      inputTokens: response.usage?.prompt_tokens ?? 0,
+      outputTokens: response.usage?.completion_tokens ?? 0,
       totalTokens: response.usage?.total_tokens ?? 0,
     },
   };
