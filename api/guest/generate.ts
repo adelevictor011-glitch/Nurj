@@ -2,15 +2,15 @@ import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
-
+ 
 // ---- inlined helpers (Vercel does not ship shared _lib imports) ----
-
+ 
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing server environment variable: ${name}`);
   return value;
 }
-
+ 
 const env = {
   get supabaseUrl() { return required('SUPABASE_URL'); },
   get supabaseServiceRoleKey() { return required('SUPABASE_SERVICE_ROLE_KEY'); },
@@ -21,7 +21,7 @@ const env = {
   // Salt for hashing guest IP addresses. Never store a raw IP.
   get guestIpSalt() { return required('GUEST_IP_SALT'); },
 };
-
+ 
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -32,21 +32,21 @@ function json(data: unknown, status = 200, headers: HeadersInit = {}): Response 
     },
   });
 }
-
+ 
 function fail(message: string, status = 400): Response {
   return json({ error: message }, status);
 }
-
+ 
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
   return (await request.json()) as T;
 }
-
+ 
 function safeMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unexpected server error.';
 }
-
+ 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
   if (typeof value !== 'string') {
     if (!required && value == null) return '';
@@ -57,38 +57,38 @@ function assertText(value: unknown, label: string, maxLength: number, required =
   if (text.length > maxLength) throw new Error(`${label} is too long.`);
   return text;
 }
-
+ 
 function adminClient() {
   return createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
-
+ 
 async function requireUser(request: Request) {
   const authorization = request.headers.get('authorization') ?? '';
   const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
   if (!token) throw new AuthError('Sign in is required.');
-
+ 
   const supabase = adminClient();
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) throw new AuthError('Your session is invalid or expired.');
   return { user: data.user, supabase };
 }
-
+ 
 class AuthError extends Error {}
-
+ 
 let client: OpenAI | null = null;
-
+ 
 function openai() {
   client ??= new OpenAI({ apiKey: env.openaiApiKey });
   return client;
 }
-
+ 
 interface StructuredResult<T> {
   data: T;
   usage: { model: string; inputTokens: number; outputTokens: number; totalTokens: number };
 }
-
+ 
 async function createStructuredResponse<T>(params: {
   name: string;
   instructions: string;
@@ -109,9 +109,9 @@ async function createStructuredResponse<T>(params: {
       },
     },
   });
-
+ 
   if (!response.output_text) throw new Error('The AI returned an empty response.');
-
+ 
   return {
     data: JSON.parse(response.output_text) as T,
     usage: {
@@ -122,14 +122,14 @@ async function createStructuredResponse<T>(params: {
     },
   };
 }
-
+ 
 interface GeneratedPayload {
   title: string;
   prompt: string;
   why_it_works: string;
   next_action: string;
 }
-
+ 
 const generateSchema = {
   type: 'object',
   additionalProperties: false,
@@ -141,11 +141,11 @@ const generateSchema = {
   },
   required: ['title', 'prompt', 'why_it_works', 'next_action'],
 };
-
+ 
 const GENERATE_INSTRUCTIONS = `You are Nurj, a commercially rigorous prompt architect for Nigerian founders and side-hustle operators. Your job is to write the prompt the user should give another capable AI—not to complete the business task itself.
-
+ 
 Build prompts with a precise expert role, concrete business context, exact objective, useful output format, quality constraints, Nigerian market context only when relevant, and one immediate execution endpoint. Do not imitate a living person's distinctive voice. You may apply broadly known principles associated with an expert, but state them as principles. Avoid generic motivation, stereotypes, fabricated data and unnecessary length. The final prompt must be ready to copy and use.`;
-
+ 
 /**
  * Sector-specific priors. This is where the classifier stops being decoration
  * and starts making a caterer's first prompt better than a generic one.
@@ -163,14 +163,14 @@ const CATEGORY_BRIEFS: Record<string, string> = {
   professional_services: 'Positioning, a specific ideal client and a clear engagement scope decide pricing power. Retainers beat one-off projects.',
   other: '',
 };
-
+ 
 const STAGE_BRIEFS: Record<string, string> = {
   validation: 'The constraint is evidence, not execution volume. Bias the prompt toward buyer conversations, falsifiable tests and commitment signals rather than building or branding.',
   launch: 'The constraint is pipeline. Bias the prompt toward outreach, offer clarity and closing the first paying customers, not systems or scale.',
   scaling: 'The constraint is repeatability. Bias the prompt toward delegation, documented process, margin discipline and channel consistency.',
   exit: 'The constraint is transferability. Bias the prompt toward clean financials, reduced founder dependency and defensible asset value.',
 };
-
+ 
 function buildGenerateInput(params: {
   stage: string;
   goal: string;
@@ -182,7 +182,7 @@ function buildGenerateInput(params: {
 }): string {
   const categoryBrief = CATEGORY_BRIEFS[params.category ?? 'other'] ?? '';
   const stageBrief = STAGE_BRIEFS[params.stage] ?? '';
-
+ 
   return `Growth stage: ${params.stage}
 Goal: ${params.goal}
 Business: ${params.business}
@@ -190,10 +190,10 @@ Target customer: ${params.customer}
 Task context: ${params.context?.trim() || 'No extra context supplied.'}
 Strategic influence: ${params.mentor?.trim() || 'None supplied.'}
 ${categoryBrief ? `\nSector dynamics to respect: ${categoryBrief}` : ''}${stageBrief ? `\nStage constraint to respect: ${stageBrief}` : ''}
-
+ 
 Create a title, the complete prompt, a concise explanation of why it works, and one next action the founder can complete today.`;
 }
-
+ 
 /**
  * Turns a request into a stable, non-reversible daily identifier.
  * The raw IP never touches the database.
@@ -203,9 +203,9 @@ function guestFingerprint(request: Request): string {
   const ip = forwarded.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
   return createHash('sha256').update(`${env.guestIpSalt}:${ip}`).digest('hex');
 }
-
+ 
 class GuestQuotaError extends Error {}
-
+ 
 async function consumeGuestQuota(supabase: SupabaseClient, ipHash: string) {
   const { data, error } = await supabase.rpc('consume_guest_quota', { p_ip_hash: ipHash });
   if (error) throw new Error('Usage could not be checked.');
@@ -215,13 +215,36 @@ async function consumeGuestQuota(supabase: SupabaseClient, ipHash: string) {
   }
   return result;
 }
-
+ 
 async function refundGuestQuota(supabase: SupabaseClient, ipHash: string) {
   await supabase.rpc('refund_guest_quota', { p_ip_hash: ipHash });
 }
-
+ 
+function logModelUsage(
+  supabase: SupabaseClient,
+  entry: {
+    userId: string | null;
+    kind: 'generate' | 'enhance' | 'guest_generate';
+    usage: { model: string; inputTokens: number; outputTokens: number; totalTokens: number };
+  },
+) {
+  void supabase
+    .from('model_usage')
+    .insert({
+      user_id: entry.userId,
+      kind: entry.kind,
+      model: entry.usage.model,
+      input_tokens: entry.usage.inputTokens,
+      output_tokens: entry.usage.outputTokens,
+      total_tokens: entry.usage.totalTokens,
+    })
+    .then(({ error }: { error: { message?: string } | null }) => {
+      if (error) console.error('[telemetry] model_usage insert failed', error.message);
+    });
+}
+ 
 // ---- endpoint ----
-
+ 
 interface GuestBody {
   goal?: unknown;
   business?: unknown;
@@ -231,7 +254,7 @@ interface GuestBody {
   stage?: unknown;
   category?: unknown;
 }
-
+ 
 /**
  * One real generation per IP per day, no account required.
  *
@@ -243,7 +266,7 @@ export async function POST(request: Request): Promise<Response> {
   const supabase = adminClient();
   let fingerprint = '';
   let consumed = false;
-
+ 
   try {
     fingerprint = guestFingerprint(request);
     const body = await readJson<GuestBody>(request);
@@ -254,19 +277,19 @@ export async function POST(request: Request): Promise<Response> {
     const mentor = assertText(body.mentor, 'Strategic influence', 300, false);
     const stage = assertText(body.stage, 'Stage', 30, false) || 'launch';
     const category = assertText(body.category, 'Category', 40, false);
-
+ 
     await consumeGuestQuota(supabase, fingerprint);
     consumed = true;
-
+ 
     const { data: result, usage } = await createStructuredResponse<GeneratedPayload>({
       name: 'nurj_prompt_architecture',
       schema: generateSchema,
       instructions: GENERATE_INSTRUCTIONS,
       input: buildGenerateInput({ stage, goal, business, customer, context, mentor, category }),
     });
-
+ 
     logModelUsage(supabase, { userId: null, kind: 'guest_generate', usage });
-
+ 
     return json({ ...result, remaining: 0, guest: true });
   } catch (error) {
     if (consumed && fingerprint && !(error instanceof GuestQuotaError)) {
