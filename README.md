@@ -186,4 +186,4 @@ The code is deployable, but production launch also requires decisions and conten
 - analytics/error-monitoring consent choices;
 - customer-support process and refund rules.
 
-Use `DEPLOYMENT_CHECKLIST.md` for the complete go-live sequence and `SECURITY.md` for secret and database boundaries.
+Use `DEPLOYMENT_CHECKLIST.md` for the complete go-live sequence and `SECURITY.md` for secret and database boundaries. 
