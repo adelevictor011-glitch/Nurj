@@ -281,7 +281,7 @@ export async function POST(request: Request): Promise<Response> {
     const business = assertText(body.business, 'Business', 800);
     const customer = assertText(body.customer, 'Target customer', 800);
     const context = assertText(body.context, 'Context', 1800, false);
-    const mentor = assertText(body.mentor, 'Strategic influence', 300, false);
+    const mentor = assertText(body.mentor, 'Strategic influence', 1500, false);
     const stage = assertText(body.stage, 'Stage', 30);
     const category = assertText(body.category, 'Category', 40, false);
 
