@@ -5,6 +5,8 @@
 - [ ] Create the production project.
 - [ ] Run `supabase/migrations/001_initial.sql`.
 - [ ] Run `supabase/migrations/002_guest_trial_and_cost_controls.sql`.
+- [ ] Run `supabase/migrations/003_execution_loop.sql`.
+- [ ] Run `supabase/migrations/004_comp_accounts.sql` (free Operator access for the emails in `comp_accounts`).
 - [ ] Enable Google as an Auth provider.
 - [ ] Set the Site URL to the final Vercel domain.
 - [ ] Add `http://localhost:3000` and all Vercel preview/production callback URLs to the Auth redirect allow list.
