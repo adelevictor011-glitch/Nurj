@@ -292,12 +292,18 @@ function App() {
     setScreen('quiz');
   }
 
-  async function completeQuiz(stageKey: StageKey) {
+  async function completeQuiz(stageKey: StageKey, details: { business: string; customer: string }) {
+    const business = details.business.trim();
+    const customer = details.customer.trim();
     const nextProfile: UserProfile = {
       ...profile,
       id: user?.id ?? 'guest',
       display_name: user?.user_metadata.full_name ?? profile.display_name ?? 'Builder',
       stage: stageKey,
+      // Blank means "not told us yet" — keep whatever was already saved.
+      business_description: business || profile.business_description,
+      target_customer: customer || profile.target_customer,
+      business_category: business ? classifyBusiness(business) : profile.business_category,
       onboarding_complete: true,
       momentum_score: 24,
     };
@@ -308,6 +314,8 @@ function App() {
         id: user.id,
         display_name: nextProfile.display_name,
         stage: stageKey,
+        ...(business ? { business_description: business, business_category: classifyBusiness(business) } : {}),
+        ...(customer ? { target_customer: customer } : {}),
         onboarding_complete: true,
         momentum_score: 24,
         updated_at: new Date().toISOString(),
@@ -364,7 +372,7 @@ function App() {
         )}
         {screen === 'quiz' && (
           <Page key="quiz">
-            <Quiz onComplete={completeQuiz} onBack={() => setScreen('landing')} />
+            <Quiz onComplete={completeQuiz} onBack={() => setScreen('landing')} initialBusiness={profile.business_description ?? ''} initialCustomer={profile.target_customer ?? ''} />
           </Page>
         )}
         {screen === 'result' && (
@@ -590,15 +598,28 @@ function Landing({
   );
 }
 
-function Quiz({ onComplete, onBack }: { onComplete: (stage: StageKey) => void; onBack: () => void }) {
+function Quiz({
+  onComplete,
+  onBack,
+  initialBusiness,
+  initialCustomer,
+}: {
+  onComplete: (stage: StageKey, details: { business: string; customer: string }) => void;
+  onBack: () => void;
+  initialBusiness: string;
+  initialCustomer: string;
+}) {
   const [index, setIndex] = useState(0);
   const [scores, setScores] = useState<number[]>([]);
+  const [finishedStage, setFinishedStage] = useState<StageKey | null>(null);
+  const [business, setBusiness] = useState(initialBusiness);
+  const [customer, setCustomer] = useState(initialCustomer);
   const question = QUIZ[index];
 
   function answer(value: number) {
     const nextScores = [...scores, value];
     if (index === QUIZ.length - 1) {
-      void onComplete(assignStage(nextScores).key);
+      setFinishedStage(assignStage(nextScores).key);
       return;
     }
     setScores(nextScores);
@@ -606,9 +627,41 @@ function Quiz({ onComplete, onBack }: { onComplete: (stage: StageKey) => void; o
   }
 
   function back() {
+    if (finishedStage) {
+      setFinishedStage(null);
+      return;
+    }
     if (index === 0) return onBack();
     setIndex((valueIndex) => valueIndex - 1);
     setScores((values) => values.slice(0, -1));
+  }
+
+  if (finishedStage) {
+    return (
+      <main className="focus-shell">
+        <div className="focus-top"><Brand /><span>Your business</span></div>
+        <div className="quiz-progress"><i style={{ width: '100%' }} /></div>
+        <form
+          className="quiz-card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onComplete(finishedStage, { business, customer });
+          }}
+        >
+          <button type="button" className="icon-button" onClick={back} aria-label="Back"><ArrowLeft size={18} /></button>
+          <h1>Tell Nurj about your business.</h1>
+          <p>Both are optional here and you can change them any time in Settings. They only pre-fill your prompts; you can still edit them every time.</p>
+          <div className="form-grid">
+            <label className="full"><span>Your business</span><textarea className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-person brand identity studio for Nigerian fashion businesses" /></label>
+            <label className="full"><span>Target audience</span><textarea className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="Founder-led fashion brands in Lagos selling through Instagram" /></label>
+          </div>
+          <div className="canvas-footer">
+            <button type="button" className="button button-ghost" onClick={() => onComplete(finishedStage, { business: '', customer: '' })}>Skip for now</button>
+            <button className="button button-primary">Continue <ArrowRight size={16} /></button>
+          </div>
+        </form>
+      </main>
+    );
   }
 
   return (
@@ -1038,10 +1091,10 @@ function PromptStudio({
             <form onSubmit={generate}>
               <div className="canvas-heading"><span>STEP 02</span><h2>Make the intelligence yours.</h2><p>Two required details separate a generic template from a commercial tool.</p></div>
               <div className="form-grid">
-                <label className="full"><span>Your business <b>required</b></span><input className="field" value={business} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-person brand identity studio for Nigerian fashion businesses" /><small>{business ? `Detected intelligence segment: ${classifyBusiness(business).replaceAll('_', ' ')}` : 'Describe the business in one clear sentence.'}</small></label>
-                <label className="full"><span>Target customer <b>required</b></span><input className="field" value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="Founder-led fashion brands in Lagos selling through Instagram" /></label>
-                <label><span>Task context <em>optional</em></span><textarea className="field" value={context} onChange={(event) => setContext(event.target.value)} placeholder="What is happening, what has been tried, important constraints…" /></label>
-                <label><span>Strategic influence <em>optional</em></span><textarea className="field" value={mentor} onChange={(event) => setMentor(event.target.value)} placeholder="A framework or expert whose principles are relevant—not an imitation request." /></label>
+                <label className="full"><span>Your business <b>required</b></span><input className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-person brand identity studio for Nigerian fashion businesses" /><small>{business ? `Detected intelligence segment: ${classifyBusiness(business).replaceAll('_', ' ')}` : 'Describe the business in one clear sentence.'}</small></label>
+                <label className="full"><span>Target customer <b>required</b></span><input className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="Founder-led fashion brands in Lagos selling through Instagram" /></label>
+                <label><span>Task context <em>optional · this prompt only</em></span><textarea className="field" value={context} maxLength={1800} autoComplete="off" onChange={(event) => setContext(event.target.value)} placeholder="What is happening, what has been tried, important constraints…" /></label>
+                <label><span>Mentors / framework <em>optional · this prompt only</em></span><textarea className="field" value={mentor} maxLength={1500} autoComplete="off" onChange={(event) => setMentor(event.target.value)} placeholder="A framework or expert whose principles are relevant—not an imitation request." /></label>
               </div>
               <div className="context-summary"><Gauge size={17} /><div><strong>Context quality</strong><span>{business && customer ? context ? 'High signal' : 'Good foundation' : 'Needs required details'}</span></div><i style={{ width: business && customer ? context ? '92%' : '68%' : '20%' }} /></div>
               {wall === 'quota' && (
@@ -1295,7 +1348,7 @@ function Account({
     <div className="screen-stack account-screen">
       <section className="screen-heading"><div><span className="eyebrow">WORKSPACE SETTINGS</span><h1>Keep Nurj close to the business.</h1><p>Your saved context makes every future prompt faster and more specific.</p></div></section>
       <section className="account-grid">
-        <form className="panel account-form" onSubmit={save}><div className="panel-title"><div><span className="eyebrow">BUSINESS PROFILE</span><h3>Core context</h3></div><Settings2 size={18} /></div><label><span>Your name</span><input className="field" value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Business description</span><textarea className="field" value={business} onChange={(event) => setBusiness(event.target.value)} placeholder="What you sell and the outcome it creates" /></label><label><span>Target customer</span><textarea className="field" value={customer} onChange={(event) => setCustomer(event.target.value)} placeholder="The specific people or companies you serve" /></label><button className="button button-primary" disabled={saving}>{saving ? 'Saving…' : 'Save workspace'}</button></form>
+        <form className="panel account-form" onSubmit={save}><div className="panel-title"><div><span className="eyebrow">BUSINESS PROFILE</span><h3>Core context</h3></div><Settings2 size={18} /></div><label><span>Your name</span><input className="field" value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Business description</span><textarea className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="What you sell and the outcome it creates" /></label><label><span>Target audience</span><textarea className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="The specific people or companies you serve" /></label><button className="button button-primary" disabled={saving}>{saving ? 'Saving…' : 'Save workspace'}</button></form>
         <div className="account-side">
           <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
           <article className="panel security-card"><ShieldCheck size={21} /><div><strong>Secure by design</strong><p>Secret AI and payment keys remain inside Vercel Functions. Paid-plan fields cannot be edited from the browser.</p></div></article>

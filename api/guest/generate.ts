@@ -196,7 +196,7 @@ Goal: ${params.goal}
 Business: ${params.business}
 Target customer: ${params.customer}
 Task context: ${params.context?.trim() || 'No extra context supplied.'}
-Strategic influence: ${params.mentor?.trim() || 'None supplied.'}
+Mentors / framework: ${params.mentor?.trim() || 'None supplied.'}
 ${categoryBrief ? `\nSector dynamics to respect: ${categoryBrief}` : ''}${stageBrief ? `\nStage constraint to respect: ${stageBrief}` : ''}
 
 Create a title, the complete prompt, a concise explanation of why it works, and one next action the founder can complete today.`;
@@ -282,7 +282,7 @@ export async function POST(request: Request): Promise<Response> {
     const business = assertText(body.business, 'Business', 800);
     const customer = assertText(body.customer, 'Target customer', 800);
     const context = assertText(body.context, 'Context', 1200, false);
-    const mentor = assertText(body.mentor, 'Strategic influence', 1500, false);
+    const mentor = assertText(body.mentor, 'Mentors / framework', 1500, false);
     const stage = assertText(body.stage, 'Stage', 30, false) || 'launch';
     const category = assertText(body.category, 'Category', 40, false);
 
