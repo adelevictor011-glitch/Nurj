@@ -117,6 +117,15 @@ export async function GET(request: Request): Promise<Response> {
         .single();
       if (downgraded) profile = downgraded;
     }
+    // If a lapse or refund locked the business in use, fall back to the
+    // oldest one (always unlocked). No-op before migration 009 is run.
+    if (profile.active_business_id) {
+      const { error: lockError } = await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
+      if (!lockError) {
+        const { data: refreshed } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        if (refreshed) profile = refreshed;
+      }
+    }
     const paid = profile.plan !== 'free' && Boolean(profile.plan_expires_at) && new Date(profile.plan_expires_at) > new Date();
     const promptUsed = usageResult.data?.prompt_count ?? 0;
     const enhanceUsed = usageResult.data?.enhance_count ?? 0;
@@ -128,7 +137,16 @@ export async function GET(request: Request): Promise<Response> {
       .eq('email', (user.email ?? '').toLowerCase())
       .maybeSingle();
 
+    // Sector insights (feature 10). Only results with 30+ reports come back,
+    // so they switch on by themselves as reports arrive.
+    let insights: unknown = null;
+    if (profile.business_category) {
+      const { data: insightData, error: insightError } = await supabase.rpc('sector_insights', { p_category: profile.business_category, p_min: 30 });
+      if (!insightError) insights = insightData;
+    }
+
     return json({
+      insights,
       admin: adminRow?.note === 'admin',
       profile,
       usage: {

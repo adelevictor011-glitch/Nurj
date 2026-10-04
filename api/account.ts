@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -106,20 +106,26 @@ function emailHash(email: string | undefined): string | null {
 
 async function refundEligibility(supabase: SupabaseClient, userId: string, email: string | undefined) {
   const hash = emailHash(email);
-  const [{ data: payment }, { count }, { count: hashCount }] = await Promise.all([
+  const since = new Date(Date.now() - REFUND_WINDOW_DAYS * 86_400_000).toISOString();
+  const [{ data: payments }, { count }, { count: hashCount }] = await Promise.all([
     supabase
       .from('payments')
       .select('reference, plan, amount, currency, status, paid_at, verified_at, created_at')
       .eq('user_id', userId)
       .eq('status', 'success')
+      .gt('paid_at', since)
       .order('paid_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(10),
     supabase.from('refund_requests').select('id', { count: 'exact', head: true }).eq('user_id', userId),
     hash
       ? supabase.from('refund_requests').select('id', { count: 'exact', head: true }).eq('email_hash', hash)
       : Promise.resolve({ count: 0 }),
   ]);
+
+  // The guarantee covers plans first: if a plan and an add-on were both
+  // bought this week, the once-per-person refund goes to the plan.
+  const recent = (payments ?? []) as PaymentRow[];
+  const payment = recent.find((item) => item.plan !== 'business_addon') ?? recent[0] ?? null;
 
   const row = payment as PaymentRow | null;
   if (!row) return { eligible: false as const, reason: 'No paid plan to refund.' };
@@ -149,25 +155,76 @@ async function paystackRefund(reference: string): Promise<{ ok: boolean; message
   }
 }
 
-async function notifyAdmin(subject: string, text: string) {
-  const resendKey = process.env.RESEND_API_KEY;
+// ---- email: Brevo (free plan: 300 a day), or Resend if only it is set ----
+function parseSender(value: string): { name?: string; email: string } {
+  const match = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(value);
+  return match ? { ...(match[1] ? { name: match[1] } : {}), email: match[2].trim() } : { email: value.trim() };
+}
+
+function emailConfigured(): boolean {
+  return Boolean((process.env.BREVO_API_KEY || process.env.RESEND_API_KEY) && process.env.REMINDER_FROM_EMAIL);
+}
+
+async function sendEmail(message: { to: string; subject: string; text: string; headers?: Record<string, string> }): Promise<boolean> {
   const from = process.env.REMINDER_FROM_EMAIL;
+  const brevoKey = process.env.BREVO_API_KEY;
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!from || (!brevoKey && !resendKey)) return false;
+  try {
+    const response = brevoKey
+      ? await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: { 'api-key': brevoKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            sender: parseSender(from),
+            to: [{ email: message.to }],
+            subject: message.subject,
+            textContent: message.text,
+            ...(message.headers ? { headers: message.headers } : {}),
+          }),
+        })
+      : await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: message.to, subject: message.subject, text: message.text, ...(message.headers ? { headers: message.headers } : {}) }),
+        });
+    if (!response.ok) console.error('[email] send failed', response.status, await response.text().catch(() => ''));
+    return response.ok;
+  } catch (error) {
+    console.error('[email] send failed', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+async function notifyAdmin(subject: string, text: string) {
   const to = process.env.ADMIN_ALERT_EMAIL;
   console.warn('[account]', subject, text);
-  if (!resendKey || !from || !to) return;
-  try {
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject, text }),
+  if (to) await sendEmail({ to, subject, text });
+}
+
+// One-click unsubscribe for the Monday digest (feature 6). The token is an
+// HMAC of the user id, so links cannot be forged for other accounts.
+function digestToken(userId: string): string {
+  return createHmac('sha256', `digest:${process.env.GUEST_IP_SALT ?? ''}`).update(userId).digest('hex').slice(0, 32);
+}
+
+async function unsubscribe(token: string): Promise<Response> {
+  const [userId, signature] = token.split('.');
+  const page = (message: string, status = 200) =>
+    new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nurj</title><body style="font-family:system-ui;background:#080907;color:#f5f6ef;display:grid;place-items:center;min-height:90vh;padding:16px"><div style="max-width:420px"><h1 style="font-size:20px">${message}</h1><p style="color:#9da294">You can switch the Monday digest back on in Nurj, under Settings.</p><a style="color:#edb84c" href="/">Open Nurj</a></div>`, {
+      status,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
     });
-  } catch (error) {
-    console.error('[account] admin email failed', safeMessage(error));
-  }
+  if (!userId || !signature || signature !== digestToken(userId)) return page('That unsubscribe link is not valid.', 400);
+  const { error } = await adminClient().from('profiles').update({ digest_opt_out: true }).eq('id', userId);
+  if (error) return page('Something went wrong. Please try again.', 500);
+  return page('You will no longer get the Monday digest.');
 }
 
 export async function GET(request: Request): Promise<Response> {
   try {
+    const token = new URL(request.url).searchParams.get('unsubscribe');
+    if (token) return await unsubscribe(token);
     const { user, supabase } = await requireUser(request);
     const refund = await refundEligibility(supabase, user.id, user.email);
     return json({
@@ -189,6 +246,10 @@ interface AccountBody {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    // Mail apps send one-click unsubscribes as a POST (RFC 8058).
+    const token = new URL(request.url).searchParams.get('unsubscribe');
+    if (token) return await unsubscribe(token);
+
     const { user, supabase } = await requireUser(request);
     const body = await readJson<AccountBody>(request);
     const action = assertText(body.action, 'Action', 20);
@@ -279,10 +340,21 @@ export async function POST(request: Request): Promise<Response> {
         .single();
       if (claimError || !claim) throw new Error('A refund is already being processed for this payment.');
 
+      if (payment.plan === 'business_addon') {
+        // An add-on refund removes that business slot; the plan is untouched.
+        const { error: slotError } = await supabase.from('business_addons').delete().eq('payment_reference', payment.reference);
+        if (slotError) {
+          await supabase.from('refund_requests').delete().eq('id', claim.id);
+          throw new Error('Your refund could not be started. Please try again.');
+        }
+        await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
+      }
+
       // Remove the 30 days this payment added BEFORE money moves, so a
       // timeout or a manual refund can never leave paid time behind. If an
       // earlier payment still has time left, fall back to that payment's plan
       // (refunding an upgrade must not keep the higher plan).
+      const isAddon = payment.plan === 'business_addon';
       const expires = profile?.plan_expires_at ? new Date(profile.plan_expires_at).getTime() - PLAN_DAYS * 86_400_000 : 0;
       const stillPaid = expires > Date.now();
       let fallbackPlan: string = 'free';
@@ -293,23 +365,27 @@ export async function POST(request: Request): Promise<Response> {
           .eq('user_id', user.id)
           .eq('status', 'success')
           .neq('reference', payment.reference)
+          .in('plan', ['builder', 'operator'])
           .order('paid_at', { ascending: false })
           .limit(1)
           .maybeSingle();
         fallbackPlan = previous?.plan ?? profile?.plan ?? 'free';
       }
-      const { error: planError } = await supabase
-        .from('profiles')
-        .update({
-          plan: stillPaid ? fallbackPlan : 'free',
-          plan_expires_at: stillPaid ? new Date(expires).toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
+      const { error: planError } = isAddon
+        ? { error: null }
+        : await supabase
+            .from('profiles')
+            .update({
+              plan: stillPaid ? fallbackPlan : 'free',
+              plan_expires_at: stillPaid ? new Date(expires).toISOString() : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id);
       if (planError) {
         await supabase.from('refund_requests').delete().eq('id', claim.id);
         throw new Error('Your refund could not be started. Please try again.');
       }
+      if (!isAddon) await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
 
       const result = await paystackRefund(payment.reference);
       await supabase

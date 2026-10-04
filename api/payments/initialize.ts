@@ -83,6 +83,8 @@ class AuthError extends Error {}
 const PLANS = {
   builder: { amount: 1_000_000, label: 'Builder' },
   operator: { amount: 2_500_000, label: 'Operator' },
+  // Option A add-on: one extra business slot for 30 days (paid plans only).
+  business_addon: { amount: 500_000, label: 'Extra business' },
 } as const;
 
 type PaidPlan = keyof typeof PLANS;
@@ -134,10 +136,24 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const { user, supabase } = await requireUser(request);
     const body = await readJson<{ plan?: unknown }>(request);
-    if (body.plan !== 'builder' && body.plan !== 'operator') throw new Error('Choose a valid plan.');
+    if (body.plan !== 'builder' && body.plan !== 'operator' && body.plan !== 'business_addon') throw new Error('Choose a valid plan.');
     const plan = body.plan as PaidPlan;
     const planConfig = PLANS[plan];
     if (!user.email) throw new Error('Your account needs an email address before checkout.');
+
+    if (plan === 'business_addon') {
+      // Extra business slots need an active paid plan, and stop at two.
+      const [{ data: profile }, { count }, { count: pending }] = await Promise.all([
+        supabase.from('profiles').select('plan, plan_expires_at').eq('id', user.id).single(),
+        supabase.from('business_addons').select('id', { count: 'exact', head: true }).eq('user_id', user.id).gt('expires_at', new Date().toISOString()),
+        supabase.from('payments').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('plan', 'business_addon')
+          .eq('status', 'initialized').gt('created_at', new Date(Date.now() - 3_600_000).toISOString()),
+      ]);
+      const paid = profile && profile.plan !== 'free' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date();
+      if (!paid) throw new Error('Extra business slots are for Builder and Operator members.');
+      if ((count ?? 0) >= 2) throw new Error('You already have the maximum of 2 extra business slots.');
+      if ((count ?? 0) + (pending ?? 0) >= 2) throw new Error('You have an unfinished checkout for a business slot. Complete it, or try again in an hour.');
+    }
 
     const reference = `nurj-${plan}-${randomUUID().replaceAll('-', '')}`;
     const { error } = await supabase.from('payments').insert({
@@ -156,7 +172,7 @@ export async function POST(request: Request): Promise<Response> {
       currency: 'NGN',
       reference,
       callback_url: `${env.appUrl}/?reference=${encodeURIComponent(reference)}`,
-      metadata: JSON.stringify({ user_id: user.id, plan, product: 'nurj_access_30_days' }),
+      metadata: JSON.stringify({ user_id: user.id, plan, product: plan === 'business_addon' ? 'nurj_business_slot_30_days' : 'nurj_access_30_days' }),
     });
 
     return json({ authorization_url: transaction.authorization_url, reference: transaction.reference });

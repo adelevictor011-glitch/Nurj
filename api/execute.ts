@@ -176,6 +176,47 @@ async function spendLevel(supabase: SupabaseClient): Promise<SpendLevel> {
   return level;
 }
 
+// ---- email: Brevo (free plan: 300 a day), or Resend if only it is set ----
+function parseSender(value: string): { name?: string; email: string } {
+  const match = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(value);
+  return match ? { ...(match[1] ? { name: match[1] } : {}), email: match[2].trim() } : { email: value.trim() };
+}
+
+function emailConfigured(): boolean {
+  return Boolean((process.env.BREVO_API_KEY || process.env.RESEND_API_KEY) && process.env.REMINDER_FROM_EMAIL);
+}
+
+async function sendEmail(message: { to: string; subject: string; text: string; headers?: Record<string, string> }): Promise<boolean> {
+  const from = process.env.REMINDER_FROM_EMAIL;
+  const brevoKey = process.env.BREVO_API_KEY;
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!from || (!brevoKey && !resendKey)) return false;
+  try {
+    const response = brevoKey
+      ? await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: { 'api-key': brevoKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            sender: parseSender(from),
+            to: [{ email: message.to }],
+            subject: message.subject,
+            textContent: message.text,
+            ...(message.headers ? { headers: message.headers } : {}),
+          }),
+        })
+      : await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: message.to, subject: message.subject, text: message.text, ...(message.headers ? { headers: message.headers } : {}) }),
+        });
+    if (!response.ok) console.error('[email] send failed', response.status, await response.text().catch(() => ''));
+    return response.ok;
+  } catch (error) {
+    console.error('[email] send failed', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: number, budget: number) {
   try {
     const { data: claimed, error } = await supabase.rpc('claim_spend_alert', { p_level: level });
@@ -188,18 +229,30 @@ async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: numb
         ? 'Free and guest AI calls are paused until midnight WAT. Paid users continue on the cheaper model.'
         : 'New AI calls now use the cheaper model.');
     console.warn('[spend]', message);
-    const resendKey = process.env.RESEND_API_KEY;
-    const from = process.env.REMINDER_FROM_EMAIL;
     const to = process.env.ADMIN_ALERT_EMAIL;
-    if (!resendKey || !from || !to) return;
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject: `Nurj AI spend at ${percent}% of today's budget`, text: message }),
-    });
+    if (to) await sendEmail({ to, subject: `Nurj AI spend at ${percent}% of today's budget`, text: message });
   } catch (error) {
     console.error('[spend] alert failed', safeMessage(error));
   }
+}
+
+// Per-user monthly budget (protects plan margin). Past it, that user's calls
+// quietly move to the cheaper model; nothing is blocked. Budgets are tokens
+// over the last 30 days: AI_MONTHLY_TOKENS_BUILDER (default 2,500,000) and
+// AI_MONTHLY_TOKENS_OPERATOR (default 6,000,000).
+function monthlyTokenBudget(plan: string): number | null {
+  const fallback = plan === 'operator' ? 6_000_000 : plan === 'builder' ? 2_500_000 : null;
+  if (fallback === null) return null;
+  const value = Number(plan === 'operator' ? process.env.AI_MONTHLY_TOKENS_OPERATOR : process.env.AI_MONTHLY_TOKENS_BUILDER);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+async function personalLevel(supabase: SupabaseClient, userId: string, plan: string, level: SpendLevel): Promise<SpendLevel> {
+  const budget = monthlyTokenBudget(plan);
+  if (budget === null || level !== 'normal') return level;
+  const { data, error } = await supabase.rpc('user_tokens_30d', { p_user: userId });
+  if (error) return level;
+  return Number(data ?? 0) >= budget ? 'degrade' : level;
 }
 
 function modelChain(level: SpendLevel): string[] {
@@ -225,6 +278,10 @@ async function callModel(params: { level: SpendLevel; system: string; user: stri
       const response = await openai().chat.completions.create({
         model,
         ...(params.json ? { response_format: { type: 'json_object' as const } } : {}),
+        // Hard cap on reply length (reasoning included) so one call can never
+        // run up the bill; lighter reasoning once spend is high.
+        max_completion_tokens: params.json ? 4000 : 6000,
+        ...(params.level !== 'normal' ? { reasoning_effort: 'low' as const } : {}),
         messages: [
           { role: 'system', content: params.system },
           { role: 'user', content: params.user },
@@ -256,8 +313,11 @@ async function callModel(params: { level: SpendLevel; system: string; user: stri
  * This is the difference between a prompt formatter and an operating layer:
  * the outcome now happens inside Nurj, so we can ask whether it worked.
  */
+const BUILDER_DAILY_RUNS = 10;
+
 export async function POST(request: Request): Promise<Response> {
   let quotaConsumed = false;
+  let runSlotConsumed = false;
   let userId = '';
   let quotaClient: Awaited<ReturnType<typeof requireUser>>['supabase'] | null = null;
 
@@ -270,9 +330,23 @@ export async function POST(request: Request): Promise<Response> {
     const prompt = assertText(body.prompt, 'Prompt', 8000);
     const historyId = assertText(body.historyId, 'History reference', 60, false);
 
-    const level = await spendLevel(supabase);
+    // Roadmap feature 4: Builder includes 10 runs a day; Operator is uncapped
+    // (still inside the 150-a-day fair-use ceiling).
+    const { data: profile } = await supabase.from('profiles').select('plan, plan_expires_at').eq('id', user.id).single();
+    const activePlan = profile && profile.plan !== 'free' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date() ? profile.plan : 'free';
+    if (activePlan === 'builder') {
+      const { data: slot, error: slotError } = await supabase.rpc('consume_run_slot', { p_user: user.id, p_limit: BUILDER_DAILY_RUNS });
+      if (slotError) throw new Error('Usage could not be checked.');
+      if (!slot) {
+        throw new QuotaError(`Builder includes ${BUILDER_DAILY_RUNS} runs a day, and you have used them. Operator removes this cap, or your runs reset at midnight.`);
+      }
+      runSlotConsumed = true;
+    }
+
+    let level = await spendLevel(supabase);
     const quota = await consumeQuota(supabase, user.id, 'prompt');
-    quotaConsumed = quota.plan === 'free';
+    quotaConsumed = true;
+    level = await personalLevel(supabase, user.id, quota.plan, level);
 
     if (level === 'paused' && quota.plan === 'free') throw new SpendPausedError("Nurj has reached today's free AI capacity. Your free prompts come back at midnight, or upgrade to keep going now.");
 
@@ -304,6 +378,7 @@ export async function POST(request: Request): Promise<Response> {
     return json({ output, remaining: quota.remaining, run_id: run?.id ?? null });
   } catch (error) {
     if (quotaConsumed && userId && quotaClient) await refundQuota(quotaClient, userId, 'prompt');
+    if (runSlotConsumed && userId && quotaClient) await quotaClient.rpc('refund_run_slot', { p_user: userId });
     const status = error instanceof AuthError ? 401 : error instanceof QuotaError ? 429 : error instanceof SpendPausedError ? 503 : error instanceof UpstreamError ? 502 : 400;
     return fail(safeMessage(error), status);
   }

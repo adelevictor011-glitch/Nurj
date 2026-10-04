@@ -102,15 +102,17 @@ function errorStatus(error: unknown) {
 export async function GET(request: Request): Promise<Response> {
   try {
     const { supabase } = await requireAdmin(request);
-    const [overview, wrap, grants] = await Promise.all([
+    const [overview, wrap, grants, features, insights] = await Promise.all([
       supabase.rpc('admin_overview'),
       supabase.rpc('admin_wrap', { p_weeks: 8 }),
       supabase.from('admin_grants').select('target_email, plan, days, granted_by, note, created_at').order('created_at', { ascending: false }).limit(10),
+      supabase.rpc('admin_feature_usage'),
+      supabase.rpc('admin_insight_progress', { p_min: 30 }),
     ]);
     if (overview.error || wrap.error) {
       throw new Error('Admin data could not be loaded. Check that migrations 006 to 008 have been run.');
     }
-    return json({ overview: overview.data, wrap: wrap.data ?? [], grants: grants.data ?? [] });
+    return json({ overview: overview.data, wrap: wrap.data ?? [], grants: grants.data ?? [], features: features.error ? null : features.data, insights: insights.error ? null : insights.data });
   } catch (error) {
     return fail(safeMessage(error), errorStatus(error));
   }

@@ -11,6 +11,8 @@ export type ScreenKey =
   | 'history'
   | 'account'
   | 'admin'
+  | 'library'
+  | 'tools'
   | 'upgrade';
 
 export interface QuizOption {
@@ -75,6 +77,8 @@ export interface UserProfile {
   momentum_score: number;
   terms_version?: string | null;
   terms_accepted_at?: string | null;
+  active_business_id?: string | null;
+  digest_opt_out?: boolean;
 }
 
 export interface UsageStatus {

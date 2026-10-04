@@ -82,6 +82,8 @@ class AuthError extends Error {}
 const PLANS = {
   builder: { amount: 1_000_000, label: 'Builder' },
   operator: { amount: 2_500_000, label: 'Operator' },
+  // Option A add-on: one extra business slot for 30 days (paid plans only).
+  business_addon: { amount: 500_000, label: 'Extra business' },
 } as const;
 
 type PaidPlan = keyof typeof PLANS;
@@ -151,7 +153,7 @@ async function activatePayment(supabase: SupabaseClient, reference: string, tran
     p_paid_at: transaction.paid_at,
   });
   if (error) throw new Error('The plan could not be activated.');
-  return data as { activated: boolean; plan: PaidPlan; expires_at: string };
+  return data as { activated: boolean; plan: PaidPlan; expires_at?: string; needs_refund?: boolean; reason?: string };
 }
 
 // ---- endpoint ----

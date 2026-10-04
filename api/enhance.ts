@@ -174,6 +174,47 @@ async function spendLevel(supabase: SupabaseClient): Promise<SpendLevel> {
   return level;
 }
 
+// ---- email: Brevo (free plan: 300 a day), or Resend if only it is set ----
+function parseSender(value: string): { name?: string; email: string } {
+  const match = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(value);
+  return match ? { ...(match[1] ? { name: match[1] } : {}), email: match[2].trim() } : { email: value.trim() };
+}
+
+function emailConfigured(): boolean {
+  return Boolean((process.env.BREVO_API_KEY || process.env.RESEND_API_KEY) && process.env.REMINDER_FROM_EMAIL);
+}
+
+async function sendEmail(message: { to: string; subject: string; text: string; headers?: Record<string, string> }): Promise<boolean> {
+  const from = process.env.REMINDER_FROM_EMAIL;
+  const brevoKey = process.env.BREVO_API_KEY;
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!from || (!brevoKey && !resendKey)) return false;
+  try {
+    const response = brevoKey
+      ? await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: { 'api-key': brevoKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            sender: parseSender(from),
+            to: [{ email: message.to }],
+            subject: message.subject,
+            textContent: message.text,
+            ...(message.headers ? { headers: message.headers } : {}),
+          }),
+        })
+      : await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: message.to, subject: message.subject, text: message.text, ...(message.headers ? { headers: message.headers } : {}) }),
+        });
+    if (!response.ok) console.error('[email] send failed', response.status, await response.text().catch(() => ''));
+    return response.ok;
+  } catch (error) {
+    console.error('[email] send failed', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: number, budget: number) {
   try {
     const { data: claimed, error } = await supabase.rpc('claim_spend_alert', { p_level: level });
@@ -186,18 +227,30 @@ async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: numb
         ? 'Free and guest AI calls are paused until midnight WAT. Paid users continue on the cheaper model.'
         : 'New AI calls now use the cheaper model.');
     console.warn('[spend]', message);
-    const resendKey = process.env.RESEND_API_KEY;
-    const from = process.env.REMINDER_FROM_EMAIL;
     const to = process.env.ADMIN_ALERT_EMAIL;
-    if (!resendKey || !from || !to) return;
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject: `Nurj AI spend at ${percent}% of today's budget`, text: message }),
-    });
+    if (to) await sendEmail({ to, subject: `Nurj AI spend at ${percent}% of today's budget`, text: message });
   } catch (error) {
     console.error('[spend] alert failed', safeMessage(error));
   }
+}
+
+// Per-user monthly budget (protects plan margin). Past it, that user's calls
+// quietly move to the cheaper model; nothing is blocked. Budgets are tokens
+// over the last 30 days: AI_MONTHLY_TOKENS_BUILDER (default 2,500,000) and
+// AI_MONTHLY_TOKENS_OPERATOR (default 6,000,000).
+function monthlyTokenBudget(plan: string): number | null {
+  const fallback = plan === 'operator' ? 6_000_000 : plan === 'builder' ? 2_500_000 : null;
+  if (fallback === null) return null;
+  const value = Number(plan === 'operator' ? process.env.AI_MONTHLY_TOKENS_OPERATOR : process.env.AI_MONTHLY_TOKENS_BUILDER);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+async function personalLevel(supabase: SupabaseClient, userId: string, plan: string, level: SpendLevel): Promise<SpendLevel> {
+  const budget = monthlyTokenBudget(plan);
+  if (budget === null || level !== 'normal') return level;
+  const { data, error } = await supabase.rpc('user_tokens_30d', { p_user: userId });
+  if (error) return level;
+  return Number(data ?? 0) >= budget ? 'degrade' : level;
 }
 
 function modelChain(level: SpendLevel): string[] {
@@ -223,6 +276,10 @@ async function callModel(params: { level: SpendLevel; system: string; user: stri
       const response = await openai().chat.completions.create({
         model,
         ...(params.json ? { response_format: { type: 'json_object' as const } } : {}),
+        // Hard cap on reply length (reasoning included) so one call can never
+        // run up the bill; lighter reasoning once spend is high.
+        max_completion_tokens: params.json ? 4000 : 6000,
+        ...(params.level !== 'normal' ? { reasoning_effort: 'low' as const } : {}),
         messages: [
           { role: 'system', content: params.system },
           { role: 'user', content: params.user },
@@ -285,11 +342,26 @@ async function createStructuredResponse<T>(params: {
 }
 
 // ---- endpoint ----
+// One function serves several AI actions (Vercel Hobby allows 12 functions):
+//   enhance  – rebuild a weak prompt (enhancement quota)
+//   refine   – "It didn't work, fix it" (feature 9, prompt quota)
+//   channel  – reshape a result for a channel within its limits (feature 15, prompt quota)
+//   script   – price-rise message from the calculator (feature 16, prompt quota)
+//   pack     – this month's Operator prompt pack (feature 4, Operator only, no quota)
 
 interface EnhanceBody {
+  mode?: unknown;
   prompt?: unknown;
   stage?: unknown;
   business?: unknown;
+  output?: unknown;
+  complaint?: unknown;
+  text?: unknown;
+  channel?: unknown;
+  product?: unknown;
+  oldPrice?: unknown;
+  newPrice?: unknown;
+  reason?: unknown;
 }
 
 interface EnhancedPayload {
@@ -311,8 +383,64 @@ const schema = {
   required: ['title', 'enhanced_prompt', 'diagnosis', 'changes'],
 };
 
+// Character targets per placement. Platform limits checked 3 October 2026;
+// Nurj writes below them and puts the hook inside the visible part.
+const CHANNELS: Record<string, { label: string; limit: number; guide: string; subject?: number }> = {
+  whatsapp_message: { label: 'WhatsApp chat or broadcast message', limit: 1000, guide: 'Conversational and warm, short paragraphs, one clear call to action, no hashtags.' },
+  whatsapp_status: { label: 'WhatsApp Status text', limit: 500, guide: 'Punchy, readable in 5 seconds, one call to action.' },
+  whatsapp_business: { label: 'WhatsApp Business profile description', limit: 480, guide: 'What the business does, who it serves, how to order. No hashtags.' },
+  instagram_caption: { label: 'Instagram feed or Reels caption', limit: 600, guide: 'Put the hook in the first 125 characters. End with 5 to 10 relevant hashtags.' },
+  instagram_bio: { label: 'Instagram profile bio', limit: 140, guide: 'Who you help, the result, and a call to action. Line breaks allowed.' },
+  tiktok_caption: { label: 'TikTok video caption', limit: 300, guide: 'Hook in the first 100 characters. End with 3 to 5 hashtags.' },
+  tiktok_photo_title: { label: 'TikTok photo post title', limit: 80, guide: 'A curiosity-driven title. No hashtags.' },
+  tiktok_bio: { label: 'TikTok profile bio', limit: 75, guide: 'Who you help and why to follow. No hashtags.' },
+  email: { label: 'Email', limit: 1100, subject: 50, guide: 'A subject line of at most 50 characters, then a body of at most 150 words with one call to action.' },
+};
+
+const channelSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: { subject: { type: 'string' }, text: { type: 'string' } },
+  required: ['subject', 'text'],
+};
+
+const packSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    title: { type: 'string' },
+    prompts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { title: { type: 'string' }, use_when: { type: 'string' }, prompt: { type: 'string' } },
+        required: ['title', 'use_when', 'prompt'],
+      },
+    },
+  },
+  required: ['title', 'prompts'],
+};
+
+// Trim at a sentence or word boundary if the model overshoots.
+function fitTo(text: string, limit: number): string {
+  const clean = text.trim();
+  if (clean.length <= limit) return clean;
+  const cut = clean.slice(0, limit - 1);
+  const sentence = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '), cut.lastIndexOf('\n'));
+  if (sentence > limit * 0.6) return cut.slice(0, sentence + 1).trim();
+  const space = cut.lastIndexOf(' ');
+  return `${cut.slice(0, space > 0 ? space : cut.length).trim()}…`;
+}
+
+function lagosMonth(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' }).slice(0, 7);
+}
+
+const ENHANCE_INSTRUCTIONS = `You are Nurj's prompt quality engine. Diagnose an existing prompt and rebuild it for clarity, context, control and commercial usefulness. Preserve the user's legitimate intent. Add missing role, context, output structure, constraints and success criteria. Do not insert invented facts. Do not imitate a living person's distinctive voice. Keep the enhanced prompt practical and ready to copy. Return four to six meaningful changes.`;
+
 export async function POST(request: Request): Promise<Response> {
   let quotaConsumed = false;
+  let quotaKind: 'prompt' | 'enhance' = 'enhance';
   let userId = '';
   let quotaClient: Awaited<ReturnType<typeof requireUser>>['supabase'] | null = null;
 
@@ -321,50 +449,126 @@ export async function POST(request: Request): Promise<Response> {
     userId = user.id;
     quotaClient = supabase;
     const body = await readJson<EnhanceBody>(request);
-    const originalPrompt = assertText(body.prompt, 'Prompt', 6000);
-    const stage = assertText(body.stage, 'Stage', 30, false);
-    const business = assertText(body.business, 'Business context', 800, false);
+    const mode = typeof body.mode === 'string' ? body.mode : 'enhance';
+    if (!['enhance', 'refine', 'channel', 'script', 'pack'].includes(mode)) throw new Error('Unknown action.');
 
-    const level = await spendLevel(supabase);
-    const quota = await consumeQuota(supabase, user.id, 'enhance');
-    quotaConsumed = quota.plan === 'free';
+    const PACK_CATEGORIES = ['beauty_skincare', 'fashion', 'food', 'design_creative', 'education', 'technology', 'commerce', 'finance', 'logistics', 'professional_services', 'other'];
+
+    // ---- Operator monthly pack: cached per month, sector and stage ----
+    if (mode === 'pack') {
+      const { data: profile } = await supabase.from('profiles').select('plan, plan_expires_at, business_category, stage').eq('id', user.id).single();
+      const operator = profile?.plan === 'operator' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date();
+      if (!operator) throw new QuotaError('Monthly prompt packs are part of Operator.');
+      const month = lagosMonth();
+      // business_category is user-writable, so only known sectors become
+      // cache keys; anything else shares the 'other' pack.
+      const category = PACK_CATEGORIES.includes(profile?.business_category ?? '') ? (profile?.business_category as string) : 'other';
+      const stage = profile?.stage || 'launch';
+      const cached = await supabase.from('prompt_packs').select('title, prompts, month').eq('month', month).eq('category', category).eq('stage', stage).maybeSingle();
+      if (cached.data) return json(cached.data);
+
+      // A cache miss is a real AI call, so it counts like any other.
+      quotaKind = 'prompt';
+      const level = await spendLevel(supabase);
+      await consumeQuota(supabase, user.id, 'prompt');
+      quotaConsumed = true;
+      const { data: pack, usage } = await createStructuredResponse<{ title: string; prompts: Array<{ title: string; use_when: string; prompt: string }> }>({
+        name: 'nurj_operator_pack',
+        schema: packSchema,
+        level,
+        instructions: `You are Nurj, a commercially rigorous prompt architect for Nigerian founders. Write a monthly pack of exactly 6 ready-to-use prompts for one business sector at one stage. Each prompt must give another AI a precise role, the business context to fill in (in [square brackets]), a concrete output format and a next action. Make them specific to the sector's real commercial levers in Nigeria and to the stage's main constraint. No generic motivation. Do not imitate a living person's voice.`,
+        input: `Month: ${month}\nSector: ${category.replaceAll('_', ' ')}\nStage: ${stage}\n\nReturn a short pack title and 6 prompts, each with a title, one line on when to use it, and the full prompt.`,
+      });
+      logModelUsage(supabase, { userId: user.id, kind: 'enhance', usage });
+      const prompts = (pack.prompts ?? []).slice(0, 6);
+      await supabase.from('prompt_packs').upsert({ month, category, stage, title: pack.title, prompts }, { onConflict: 'month,category,stage', ignoreDuplicates: true });
+      return json({ title: pack.title, prompts, month });
+    }
+
+    // ---- validate inputs for the quota-counted modes ----
+    let channelKey = '';
+    const inputs: Record<string, string> = {};
+    if (mode === 'enhance') {
+      inputs.prompt = assertText(body.prompt, 'Prompt', 6000);
+      inputs.stage = assertText(body.stage, 'Stage', 30, false);
+      inputs.business = assertText(body.business, 'Business context', 800, false);
+    } else if (mode === 'refine') {
+      inputs.prompt = assertText(body.prompt, 'Prompt', 8000);
+      inputs.output = assertText(body.output, 'Result', 8000, false);
+      inputs.complaint = assertText(body.complaint, 'What went wrong', 500);
+    } else if (mode === 'channel') {
+      inputs.text = assertText(body.text, 'Text', 8000);
+      channelKey = assertText(body.channel, 'Channel', 40);
+      if (!CHANNELS[channelKey]) throw new Error('Choose a channel.');
+    } else {
+      inputs.product = assertText(body.product, 'Product or service', 120);
+      inputs.oldPrice = assertText(body.oldPrice, 'Current price', 20);
+      inputs.newPrice = assertText(body.newPrice, 'New price', 20);
+      inputs.reason = assertText(body.reason, 'Reason', 300, false);
+      channelKey = assertText(body.channel, 'Channel', 40);
+      if (!CHANNELS[channelKey]) throw new Error('Choose a channel.');
+    }
+
+    quotaKind = mode === 'enhance' ? 'enhance' : 'prompt';
+    let level = await spendLevel(supabase);
+    const quota = await consumeQuota(supabase, user.id, quotaKind);
+    quotaConsumed = true;
+    level = await personalLevel(supabase, user.id, quota.plan, level);
     if (level === 'paused' && quota.plan === 'free') throw new SpendPausedError("Nurj has reached today's free AI capacity. Your free prompts come back at midnight, or upgrade to keep going now.");
 
-    const { data: result, usage } = await createStructuredResponse<EnhancedPayload>({
-      name: 'nurj_prompt_enhancement',
-      schema,
-      instructions: `You are Nurj's prompt quality engine. Diagnose an existing prompt and rebuild it for clarity, context, control and commercial usefulness. Preserve the user's legitimate intent. Add missing role, context, output structure, constraints and success criteria. Do not insert invented facts. Do not imitate a living person's distinctive voice. Keep the enhanced prompt practical and ready to copy. Return four to six meaningful changes.`,
-      input: `Original prompt:
-${originalPrompt}
-
-Business stage: ${stage || 'Not supplied'}
-Saved business context: ${business || 'Not supplied'}
-
-Return a concise title, the complete enhanced prompt, a diagnosis of the original weakness, and the meaningful changes made.`,
-      level,
-    });
-
-    // The model call has already succeeded. Bookkeeping never takes the
-    // result away from the user.
-    logModelUsage(supabase, { userId: user.id, kind: 'enhance', usage });
-
-    void supabase
-      .from('prompt_history')
-      .insert({
-        user_id: user.id,
-        kind: 'enhanced',
-        title: result.title,
-        goal: 'Enhance an existing prompt',
-        input: { original_prompt: originalPrompt, stage, business },
-        output: result,
-      })
-      .then(({ error }: { error: { message?: string } | null }) => {
-        if (error) console.error('[enhance] history insert failed', error.message);
+    if (mode === 'enhance' || mode === 'refine') {
+      const { data: result, usage } = await createStructuredResponse<EnhancedPayload>({
+        name: mode === 'enhance' ? 'nurj_prompt_enhancement' : 'nurj_prompt_refinement',
+        schema,
+        level,
+        instructions: mode === 'enhance'
+          ? ENHANCE_INSTRUCTIONS
+          : `You are Nurj's prompt repair engine. A founder ran a prompt and the result did not work for them. Using their complaint and the result they got, rewrite the prompt so the next result fixes exactly that problem. Keep everything that was fine. Be specific about audience, tone, format and constraints where the complaint points. Do not invent business facts. Return the rewritten prompt, a one-line diagnosis of why the first result missed, and three to five concrete changes.`,
+        input: mode === 'enhance'
+          ? `Original prompt:\n${inputs.prompt}\n\nBusiness stage: ${inputs.stage || 'Not supplied'}\nSaved business context: ${inputs.business || 'Not supplied'}\n\nReturn a concise title, the complete enhanced prompt, a diagnosis of the original weakness, and the meaningful changes made.`
+          : `Prompt that was run:\n${inputs.prompt}\n\nResult it produced:\n${inputs.output || '(not supplied)'}\n\nWhat went wrong, in the founder's words:\n${inputs.complaint}\n\nReturn a concise title, the complete fixed prompt, the diagnosis and the changes.`,
       });
 
-    return json({ ...result, remaining: quota.remaining });
+      logModelUsage(supabase, { userId: user.id, kind: 'enhance', usage });
+      void supabase
+        .from('prompt_history')
+        .insert({
+          user_id: user.id,
+          kind: 'enhanced',
+          title: result.title,
+          goal: mode === 'enhance' ? 'Enhance an existing prompt' : 'Fix a prompt that did not work',
+          input: mode === 'enhance'
+            ? { original_prompt: inputs.prompt, stage: inputs.stage, business: inputs.business }
+            : { original_prompt: inputs.prompt, complaint: inputs.complaint },
+          output: result,
+        })
+        .then(({ error }: { error: { message?: string } | null }) => {
+          if (error) console.error('[enhance] history insert failed', error.message);
+        });
+      return json({ ...result, remaining: quota.remaining });
+    }
+
+    // ---- channel reshape and price-rise script ----
+    const spec = CHANNELS[channelKey];
+    const { data: shaped, usage } = await createStructuredResponse<{ subject: string; text: string }>({
+      name: mode === 'channel' ? 'nurj_channel_output' : 'nurj_price_rise_script',
+      schema: channelSchema,
+      level,
+      instructions: `You are Nurj, writing for Nigerian small businesses. Write for exactly one placement: ${spec.label}. Hard limit: ${spec.limit} characters for the text, counting spaces, emojis, hashtags and @mentions. ${spec.guide} Use natural Nigerian English; use naira (₦) for money. Do not invent facts, prices or claims that are not in the input. ${spec.subject ? `Return a subject line of at most ${spec.subject} characters.` : 'Return an empty subject.'}`,
+      input: mode === 'channel'
+        ? `Reshape this for the placement, keeping its meaning and offer:\n\n${inputs.text}`
+        : `Write a respectful message telling existing customers about a price change.\nProduct or service: ${inputs.product}\nCurrent price: ${inputs.oldPrice}\nNew price: ${inputs.newPrice}\nReason: ${inputs.reason || 'not given; do not invent one, focus on quality and service'}\nThank loyal customers, state the new price and when it starts plainly, and give one reason to stay.`,
+    });
+    logModelUsage(supabase, { userId: user.id, kind: 'enhance', usage });
+    return json({
+      channel: channelKey,
+      limit: spec.limit,
+      subject: spec.subject ? fitTo(shaped.subject ?? '', spec.subject) : '',
+      text: fitTo(shaped.text ?? '', spec.limit),
+      remaining: quota.remaining,
+    });
   } catch (error) {
-    if (quotaConsumed && userId && quotaClient) await refundQuota(quotaClient, userId, 'enhance');
+    if (quotaConsumed && userId && quotaClient) await refundQuota(quotaClient, userId, quotaKind);
     const status = error instanceof AuthError ? 401 : error instanceof QuotaError ? 429 : error instanceof SpendPausedError ? 503 : error instanceof UpstreamError ? 502 : 400;
     return fail(safeMessage(error), status);
   }

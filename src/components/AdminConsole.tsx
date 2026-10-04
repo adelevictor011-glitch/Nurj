@@ -109,6 +109,35 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
         <article className="panel"><span>AI tokens</span><strong>{number(o.tokens_today)}</strong><small>today · {number(o.tokens_30d)} in 30 days</small></article>
       </section>
 
+      {data.insights && (
+        <section className="panel">
+          <div className="panel-title"><div><span className="eyebrow">BATCH 5 · SECTOR INSIGHTS</span><h3>Progress to the 30-report threshold</h3></div><span>Insights switch on by themselves</span></div>
+          {data.insights.length ? (
+            <table className="admin-table">
+              <thead><tr><th>Sector</th><th>Reports (6 months)</th><th>Best goal</th><th>Live goals</th></tr></thead>
+              <tbody>{data.insights.map((row) => (
+                <tr key={row.category}><td>{row.category.replaceAll('_', ' ')}</td><td>{number(row.reports)}</td><td>{row.best_goal_reports ?? 0} / 30</td><td>{row.live_goals}</td></tr>
+              ))}</tbody>
+            </table>
+          ) : <p className="admin-empty">No outcome reports yet. They come from "Did it work?" after a run.</p>}
+        </section>
+      )}
+
+      {data.features && (
+        <section className="panel">
+          <div className="panel-title"><div><span className="eyebrow">FEATURE USE</span><h3>Batches 2 to 4</h3></div>
+            {data.features.payments_needing_refund > 0 && <span className="admin-alert">{data.features.payments_needing_refund} payment{data.features.payments_needing_refund === 1 ? '' : 's'} to refund in Paystack</span>}
+          </div>
+          <table className="admin-table"><tbody>
+            <tr><td>Saved prompts</td><td>{number(data.features.saved_prompts)}</td></tr>
+            <tr><td>Wins logged (self-reported)</td><td>{number(data.features.wins_logged)} · {naira(data.features.wins_total_kobo)}</td></tr>
+            <tr><td>Businesses</td><td>{number(data.features.businesses)}</td></tr>
+            <tr><td>Active extra-business slots</td><td>{number(data.features.active_addons)}</td></tr>
+            <tr><td>Opted out of the Monday email</td><td>{number(data.features.digest_opted_out)}</td></tr>
+          </tbody></table>
+        </section>
+      )}
+
       <section className="panel">
         <div className="panel-title"><div><span className="eyebrow">RETENTION</span><h3>WRAP by week</h3></div><span>Faded bar = this week, still in progress</span></div>
         <WrapChart weeks={data.wrap} />
