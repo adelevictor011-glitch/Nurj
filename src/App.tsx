@@ -40,6 +40,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
+import { useDismiss } from './lib/useDismiss';
 import { GOALS, GUIDES, QUIZ, STAGES } from './data';
 import { GUIDE_CONTENT } from './guides-content';
 import { api, type RefundStatus, type SectorInsights } from './lib/api';
@@ -128,6 +129,15 @@ function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [sidebarCompact, setSidebarCompact] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  useDismiss(mobileMenu, () => setMobileMenu(false));
+  useEffect(() => {
+    // Close the phone menu if the screen grows into the desktop layout, so it
+    // never stays open (and locking the page) where it can't be seen.
+    const wide = window.matchMedia('(min-width: 821px)');
+    const onChange = () => { if (wide.matches) setMobileMenu(false); };
+    wide.addEventListener('change', onChange);
+    return () => wide.removeEventListener('change', onChange);
+  }, []);
   const [paymentBusy, setPaymentBusy] = useState<PlanKey | 'business_addon' | null>(null);
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [dataSaver, setDataSaver] = useState(() => loadLocal<boolean>('nurj-data-saver', false));
@@ -1431,6 +1441,7 @@ function Guides({ stageKey, plan, onUpgrade }: { stageKey: StageKey; plan: PlanK
 
 function GuideReader({ item, onClose }: { item: GuideItem; onClose: () => void }) {
   const blocks = GUIDE_CONTENT[item.title] ?? [];
+  useDismiss(true, onClose);
   return (
     <motion.div className="guide-reader-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
       <motion.article

@@ -881,3 +881,71 @@ body.data-saver { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, san
 .insights-bar i { display: block; height: 100%; background: var(--lime); }
 .goal-rate { display: block; color: var(--lime); font-size: 9px; margin-top: 6px; }
 @media (max-width: 640px) { .insights-list li { grid-template-columns: 1fr; gap: 4px; } }
+
+/* ── Responsiveness hardening: nothing stuck, nothing hidden ───────────────
+   dvh follows the real visible height on phones (address bar in or out), so
+   full-height panels never hide their last button below the fold. */
+html { -webkit-text-size-adjust: 100%; }
+html.scroll-locked, html.scroll-locked body { overflow: hidden; }
+img, svg, video { max-width: 100%; }
+pre, code { overflow-wrap: anywhere; }
+@supports (height: 100dvh) {
+  body, .app-root, .page-motion, .focus-shell, .workspace, .loading-screen { min-height: 100dvh; }
+  .sidebar { height: 100dvh; }
+  .guide-reader { max-height: 88dvh; }
+}
+
+/* Sidebar scrolls on short screens instead of squashing or hiding items. */
+.sidebar { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.sidebar::-webkit-scrollbar { display: none; }
+.sidebar > * { flex-shrink: 0; }
+
+/* Overlays: always scrollable, centred when they fit, top-aligned when they
+   don't (plain centring cuts off the top of a tall card). */
+.consent-gate, .usage-confirm, .guide-reader-backdrop {
+  display: flex;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+.consent-card, .usage-confirm-card, .guide-reader { margin: auto; }
+.consent-card .account-actions, .usage-confirm-card .account-actions { flex-wrap: wrap; }
+
+/* Toasts wrap long messages and clear the phone's home bar and bottom nav. */
+.toast {
+  max-width: min(520px, calc(100vw - 32px));
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  padding: 10px 15px;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+/* Comfortable tap targets. */
+.consent-check { padding: 6px 0; }
+.consent-check input { width: 20px; height: 20px; margin-top: 0; }
+.legal-links a { display: inline-block; padding: 10px 4px; font-size: 11px; }
+.panel-title > button { min-height: 36px; padding: 0 6px; }
+
+@media (max-width: 820px) {
+  .mobile-menu-button { width: 40px; height: 40px; }
+  .mobile-bottom-nav button { font-size: 10px; min-height: 48px; }
+  .workspace-content { padding-bottom: calc(95px + env(safe-area-inset-bottom)); }
+  .toast { bottom: calc(80px + env(safe-area-inset-bottom)); width: calc(100% - 32px); }
+}
+
+@media (max-width: 640px) {
+  .guide-reader-backdrop { padding: 0; }
+  .guide-reader { max-height: 100vh; min-height: 100vh; margin: 0; }
+  @supports (height: 100dvh) { .guide-reader { max-height: 100dvh; min-height: 100dvh; } }
+  .guide-reader header { padding-top: max(20px, env(safe-area-inset-top)); }
+  .guide-reader-body { padding-bottom: max(30px, env(safe-area-inset-bottom)); }
+}
+
+/* Short landscape phones: shrink the hero art so actions stay in reach. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .hero { margin-top: 24px; }
+  .mobile-bottom-nav { height: calc(54px + env(safe-area-inset-bottom)); }
+}
+button[aria-label="Remove line"] { min-width: 36px; min-height: 36px; }

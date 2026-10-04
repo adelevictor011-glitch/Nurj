@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { useDismiss } from '../lib/useDismiss';
 import type { PlanKey, UsageStatus } from '../types';
 
 /**
@@ -8,6 +9,7 @@ import type { PlanKey, UsageStatus } from '../types';
  */
 export function useUsageConfirm(usage: UsageStatus, plan: PlanKey, notify: (message: string) => void) {
   const [pending, setPending] = useState<{ action: () => void; label: string } | null>(null);
+  useDismiss(Boolean(pending), () => setPending(null));
 
   function ask(label: string, action: () => void) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
