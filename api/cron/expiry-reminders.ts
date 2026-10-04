@@ -142,6 +142,8 @@ async function sendEmail(message: { to: string; subject: string; text: string; h
   const brevoKey = process.env.BREVO_API_KEY;
   const resendKey = process.env.RESEND_API_KEY;
   if (!from || (!brevoKey && !resendKey)) return false;
+  // Replies go to a real inbox (e.g. support@nurjai.com), not the sending address.
+  const replyTo = process.env.EMAIL_REPLY_TO ? parseSender(process.env.EMAIL_REPLY_TO) : null;
   try {
     const response = brevoKey
       ? await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -152,13 +154,14 @@ async function sendEmail(message: { to: string; subject: string; text: string; h
             to: [{ email: message.to }],
             subject: message.subject,
             textContent: message.text,
+            ...(replyTo ? { replyTo } : {}),
             ...(message.headers ? { headers: message.headers } : {}),
           }),
         })
       : await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ from, to: message.to, subject: message.subject, text: message.text, ...(message.headers ? { headers: message.headers } : {}) }),
+          body: JSON.stringify({ from, to: message.to, subject: message.subject, text: message.text, ...(replyTo ? { reply_to: replyTo.email } : {}), ...(message.headers ? { headers: message.headers } : {}) }),
         });
     if (!response.ok) console.error('[email] send failed', response.status, await response.text().catch(() => ''));
     return response.ok;
