@@ -745,3 +745,27 @@ textarea.field { min-height: 104px; line-height: 1.55; }
 .account-confirm { margin-top: 16px; border: 1px solid rgba(237,184,76,.35); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; font-size: 11px; }
 .account-confirm > div { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 640px) { .snippets-name { flex-wrap: wrap; } }
+
+/* Trust layer: legal pages, consent, data controls */
+.legal-links { display: flex; justify-content: center; gap: 18px; padding: 28px 0 10px; position: relative; z-index: 2; }
+.legal-links a { color: var(--dim); font-size: 10px; text-decoration: none; }
+.legal-links a:hover { color: var(--gold); }
+.legal-home { color: var(--text); font-weight: 700; text-decoration: none; }
+.legal-doc { max-width: 720px; margin: 30px auto 0; }
+.legal-doc h1 { font-size: 30px; margin: 0 0 12px; }
+.legal-doc h2 { font-size: 15px; margin: 26px 0 8px; }
+.legal-doc p { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 0 0 10px; }
+.legal-intro { color: var(--text) !important; }
+.consent-check { display: flex; align-items: flex-start; gap: 9px; margin-top: 16px; color: var(--muted); font-size: 11px; line-height: 1.5; cursor: pointer; }
+.consent-check input { margin-top: 2px; accent-color: var(--gold); width: 16px; height: 16px; flex: none; }
+.consent-check a { color: var(--gold); }
+.consent-nudge { color: var(--gold); font-size: 10px; margin: 8px 0 0; }
+.consent-gate { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: rgba(5,6,4,.82); backdrop-filter: blur(10px); }
+.consent-card { width: min(520px, 100%); padding: 26px; }
+.consent-card h2 { margin: 8px 0 10px; font-size: 20px; }
+.consent-card p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.data-card h3 { margin: 7px 0 6px; font-size: 15px; }
+.data-card p { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.data-card p a { color: var(--gold); }
+.data-card .field { margin-top: 8px; }
+.account-confirm label span { display: block; color: #b6baaf; font-size: 10px; margin-bottom: 6px; }

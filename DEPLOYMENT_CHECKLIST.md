@@ -9,6 +9,7 @@
 - [ ] Run `supabase/migrations/004_comp_accounts.sql` (free Operator access for the emails in `comp_accounts`).
 - [ ] Run `supabase/migrations/005_saved_snippets.sql` (saved task contexts and mentors / frameworks).
 - [ ] Run `supabase/migrations/006_spend_guardrails.sql` (daily AI budget, alerts, usage view).
+- [ ] Run `supabase/migrations/007_trust_layer.sql` (consent record, refunds, anonymised payment archive).
 - [ ] Enable Google as an Auth provider.
 - [ ] Set the Site URL to the final Vercel domain.
 - [ ] Add `http://localhost:3000` and all Vercel preview/production callback URLs to the Auth redirect allow list.
@@ -53,4 +54,4 @@
 - [ ] Test guest exploration, Google sign-in, sign-out and returning sessions.
 - [ ] Test free limits: 5 prompts and 3 enhancements per day.
 - [ ] Test history, account context, plan expiry and mobile navigation.
-- [ ] Add final legal pages and customer-support contact details.
+- [ ] Confirm the support and privacy mailboxes in `src/legal.ts` exist, and have a lawyer review /terms, /privacy and /refunds.

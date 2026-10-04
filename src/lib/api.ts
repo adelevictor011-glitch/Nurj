@@ -57,4 +57,34 @@ export const api = {
     request<{ activated: boolean; plan: 'builder' | 'operator'; expires_at: string }>(
       `/api/payments/verify?reference=${encodeURIComponent(reference)}`,
     ),
+  account: () => request<{ refund: RefundStatus }>('/api/account'),
+  acceptTerms: (version: string) =>
+    request<{ terms_version: string; terms_accepted_at: string }>('/api/account', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'consent', version }),
+    }),
+  requestRefund: (reason: string) =>
+    request<{ status: 'refunded' | 'pending'; message: string }>('/api/account', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'refund', reason }),
+    }),
+  deleteAccount: () =>
+    request<{ deleted: true }>('/api/account', { method: 'POST', body: JSON.stringify({ action: 'delete', confirm: 'DELETE' }) }),
+  async exportData(): Promise<Blob> {
+    const token = await accessToken();
+    const response = await fetch('/api/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ action: 'export' }),
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || 'Your data could not be exported.');
+    }
+    return response.blob();
+  },
 };
+
+export type RefundStatus =
+  | { eligible: true; amount: number; plan: string; deadline: string }
+  | { eligible: false; reason: string };

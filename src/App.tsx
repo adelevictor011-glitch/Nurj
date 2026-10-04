@@ -39,10 +39,12 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { GOALS, GUIDES, QUIZ, STAGES } from './data';
 import { GUIDE_CONTENT } from './guides-content';
-import { api } from './lib/api';
+import { api, type RefundStatus } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { SavedSnippets } from './components/SavedSnippets';
+import { ConsentCheckbox, ConsentGate, LegalLinks, LegalPage } from './components/Legal';
+import { LEGAL_VERSION, legalFromPath } from './legal';
 import type {
   EnhanceResult,
   GenerateResult,
@@ -115,6 +117,9 @@ function App() {
   const [paymentBusy, setPaymentBusy] = useState<PlanKey | null>(null);
   const [pendingReference, setPendingReference] = useState<string | null>(null);
   const [verifyState, setVerifyState] = useState<'idle' | 'verifying' | 'failed'>('idle');
+  const [synced, setSynced] = useState(false);
+  const [consented, setConsented] = useState(() => loadLocal<string>('nurj-consent', '') === LEGAL_VERSION);
+  const legalKey = legalFromPath(window.location.pathname);
 
   const inApp = !['landing', 'quiz', 'result', 'upgrade'].includes(screen);
 
@@ -178,6 +183,18 @@ function App() {
         setScreen(intent ?? (merged.onboarding_complete ? 'home' : 'quiz'));
       }
       initialSyncDone.current = true;
+
+      // The landing-page tick is the user's agreement; record it on the
+      // account the first time they sign in. Otherwise ConsentGate asks.
+      if (merged.terms_version !== LEGAL_VERSION && loadLocal<string>('nurj-consent', '') === LEGAL_VERSION) {
+        try {
+          const accepted = await api.acceptTerms(LEGAL_VERSION);
+          setProfile((current) => ({ ...current, ...accepted }));
+        } catch (consentError) {
+          console.error('[nurj] could not record consent', consentError);
+        }
+      }
+      setSynced(true);
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Could not load your workspace.');
     }
@@ -347,9 +364,21 @@ function App() {
     }
   }
 
+  if (legalKey) {
+    return <LegalPage docKey={legalKey} />;
+  }
+
   if (!authReady) {
     return <LoadingScreen />;
   }
+
+  function giveConsent(value: boolean) {
+    setConsented(value);
+    if (value) localStorage.setItem('nurj-consent', JSON.stringify(LEGAL_VERSION));
+    else localStorage.removeItem('nurj-consent');
+  }
+
+  const needsConsent = Boolean(user) && synced && profile.terms_version !== LEGAL_VERSION;
 
   return (
     <div className="app-root">
@@ -368,7 +397,7 @@ function App() {
       <AnimatePresence mode="wait">
         {screen === 'landing' && (
           <Page key="landing">
-            <Landing onSignIn={signIn} onGuest={startGuest} configured={isSupabaseConfigured} />
+            <Landing onSignIn={signIn} onGuest={startGuest} configured={isSupabaseConfigured} consented={consented} onConsent={giveConsent} />
           </Page>
         )}
         {screen === 'quiz' && (
@@ -444,6 +473,7 @@ function App() {
                 <Account
                   profile={profile}
                   user={user}
+                  onDeleted={signOut}
                   onProfile={setProfile}
                   onUpgrade={() => setScreen('upgrade')}
                   notify={notify}
@@ -453,6 +483,20 @@ function App() {
           </Page>
         )}
       </AnimatePresence>
+      {needsConsent && (
+        <ConsentGate
+          onSignOut={signOut}
+          onAccept={async () => {
+            try {
+              const accepted = await api.acceptTerms(LEGAL_VERSION);
+              giveConsent(true);
+              setProfile((current) => ({ ...current, ...accepted }));
+            } catch (error) {
+              notify(error instanceof Error ? error.message : 'Your agreement could not be saved.');
+            }
+          }}
+        />
+      )}
       <AnimatePresence>{toast && <Toast message={toast} />}</AnimatePresence>
     </div>
   );
@@ -501,18 +545,31 @@ function Landing({
   onSignIn,
   onGuest,
   configured,
+  consented,
+  onConsent,
 }: {
   onSignIn: () => void;
   onGuest: () => void;
   configured: boolean;
+  consented: boolean;
+  onConsent: (value: boolean) => void;
 }) {
+  const [nudge, setNudge] = useState(false);
+  const guard = (action: () => void) => () => {
+    if (!consented) {
+      setNudge(true);
+      return;
+    }
+    action();
+  };
+
   return (
     <main className="landing-shell">
       <nav className="landing-nav">
         <Brand />
         <div className="landing-nav-actions">
           <span className="system-status"><i /> Systems ready</span>
-          <button className="button button-ghost button-small" onClick={onSignIn}>Sign in</button>
+          <button className="button button-ghost button-small" onClick={guard(onSignIn)}>Sign in</button>
         </div>
       </nav>
 
@@ -524,13 +581,15 @@ function Landing({
             Nurj reads where your side hustle is, identifies the constraint, and turns your next move into precise AI execution.
           </p>
           <div className="hero-actions">
-            <button className="button button-primary" onClick={onGuest}>
+            <button className="button button-primary" onClick={guard(onGuest)}>
               Run my signal scan <ArrowRight size={17} />
             </button>
-            <button className="button button-secondary" onClick={onSignIn}>
+            <button className="button button-secondary" onClick={guard(onSignIn)}>
               Continue with Google
             </button>
           </div>
+          <ConsentCheckbox checked={consented} onChange={(value) => { onConsent(value); if (value) setNudge(false); }} />
+          {nudge && !consented && <p className="consent-nudge" role="alert">Tick the box to agree to the Terms and Privacy Policy first.</p>}
           <p className="hero-microcopy">
             <ShieldCheck size={14} /> Five questions. One clear move. No credit card.
             {!configured && <span className="demo-note"> Demo mode is active until Supabase is configured.</span>}
@@ -596,6 +655,7 @@ function Landing({
         <p>Less AI theatre. More commercial movement.</p>
         <div className="future-line" />
       </section>
+      <LegalLinks />
     </main>
   );
 }
@@ -1357,12 +1417,14 @@ function HistoryScreen({ history, notify }: { history: PromptHistoryItem[]; noti
 function Account({
   profile,
   user,
+  onDeleted,
   onProfile,
   onUpgrade,
   notify,
 }: {
   profile: UserProfile;
   user: User | null;
+  onDeleted: () => void;
   onProfile: (profile: UserProfile) => void;
   onUpgrade: () => void;
   notify: (message: string) => void;
@@ -1373,6 +1435,68 @@ function Account({
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [refund, setRefund] = useState<RefundStatus | null>(null);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [dataBusy, setDataBusy] = useState<'export' | 'delete' | 'refund' | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    api.account()
+      .then(({ refund: status }) => { if (!cancelled) setRefund(status); })
+      .catch(() => { /* the panel simply stays hidden */ });
+    return () => { cancelled = true; };
+  }, [user, profile.plan_expires_at]);
+
+  async function downloadData() {
+    setDataBusy('export');
+    try {
+      const blob = await api.exportData();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `nurj-data-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Your data could not be exported.');
+    } finally {
+      setDataBusy(null);
+    }
+  }
+
+  async function deleteAccount() {
+    if (deleteText !== 'DELETE') return;
+    setDataBusy('delete');
+    try {
+      await api.deleteAccount();
+      localStorage.removeItem('nurj-profile-v2');
+      localStorage.removeItem('nurj-snippets-v1');
+      notify('Your account and data have been deleted.');
+      onDeleted();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Your account could not be deleted.');
+      setDataBusy(null);
+    }
+  }
+
+  async function requestRefund() {
+    setDataBusy('refund');
+    try {
+      const result = await api.requestRefund(refundReason.trim());
+      notify(result.message);
+      setRefundOpen(false);
+      setRefund({ eligible: false, reason: result.message });
+      if (result.status === 'refunded') onProfile({ ...profile, plan: 'free', plan_expires_at: null });
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Your refund could not be requested.');
+    } finally {
+      setDataBusy(null);
+    }
+  }
 
   const dirty =
     name.trim() !== (profile.display_name ?? '').trim() ||
@@ -1458,10 +1582,50 @@ function Account({
         </form>
         <div className="account-side">
           <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
+          {refund?.eligible && (
+            <article className="panel data-card">
+              <span className="eyebrow">7-DAY GUARANTEE</span>
+              <h3>Not working for you?</h3>
+              <p>You can get a full refund of ₦{(refund.amount / 100).toLocaleString('en-NG')} until {new Date(refund.deadline).toLocaleDateString('en-NG', { day: 'numeric', month: 'long' })}. Once per account. <a href="/refunds" target="_blank" rel="noopener">Refund policy</a></p>
+              {refundOpen ? (
+                <>
+                  <textarea className="field" value={refundReason} maxLength={500} onChange={(event) => setRefundReason(event.target.value)} placeholder="Optional: what didn't work? It helps us improve." />
+                  <div className="account-actions">
+                    <button className="button button-primary button-small" disabled={dataBusy === 'refund'} onClick={() => void requestRefund()}>{dataBusy === 'refund' ? 'Requesting…' : 'Confirm refund'}</button>
+                    <button className="button button-ghost button-small" onClick={() => setRefundOpen(false)}>Cancel</button>
+                  </div>
+                </>
+              ) : (
+                <button className="button button-secondary button-small" onClick={() => setRefundOpen(true)}>Request refund</button>
+              )}
+            </article>
+          )}
+          {user && (
+            <article className="panel data-card">
+              <span className="eyebrow">YOUR DATA</span>
+              <h3>Download or delete</h3>
+              <p>Get a copy of everything Nurj holds about you, or delete your account and data for good. Payment records are kept without your name for tax.</p>
+              <div className="account-actions">
+                <button className="button button-secondary button-small" disabled={dataBusy === 'export'} onClick={() => void downloadData()}>{dataBusy === 'export' ? 'Preparing…' : 'Download my data'}</button>
+                {!deleteOpen && <button className="button button-ghost button-small" onClick={() => setDeleteOpen(true)}>Delete account</button>}
+              </div>
+              {deleteOpen && (
+                <div className="account-confirm" role="alert">
+                  <strong>This permanently deletes your account, prompts, history and saved items. It cannot be undone. Any paid time left is lost.</strong>
+                  <label><span>Type DELETE to confirm</span><input className="field" value={deleteText} autoComplete="off" onChange={(event) => setDeleteText(event.target.value)} /></label>
+                  <div>
+                    <button className="button button-primary button-small" disabled={deleteText !== 'DELETE' || dataBusy === 'delete'} onClick={() => void deleteAccount()}>{dataBusy === 'delete' ? 'Deleting…' : 'Delete everything'}</button>
+                    <button className="button button-ghost button-small" onClick={() => { setDeleteOpen(false); setDeleteText(''); }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </article>
+          )}
           <article className="panel security-card"><ShieldCheck size={21} /><div><strong>Secure by design</strong><p>Secret AI and payment keys remain inside Vercel Functions. Paid-plan fields cannot be edited from the browser.</p></div></article>
           <article className="panel account-identity"><div className="account-avatar">{(name || 'N')[0].toUpperCase()}</div><div><strong>{name || 'Nurj builder'}</strong><span>{user?.email ?? 'Guest workspace'}</span></div><BadgeCheck size={18} /></article>
         </div>
       </section>
+      <LegalLinks />
     </div>
   );
 }

@@ -72,6 +72,8 @@ export interface UserProfile {
   plan_expires_at: string | null;
   onboarding_complete: boolean;
   momentum_score: number;
+  terms_version?: string | null;
+  terms_accepted_at?: string | null;
 }
 
 export interface UsageStatus {
