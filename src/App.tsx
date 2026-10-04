@@ -42,11 +42,12 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { GOALS, GUIDES, QUIZ, STAGES } from './data';
 import { GUIDE_CONTENT } from './guides-content';
-import { api, type RefundStatus } from './lib/api';
+import { api, type RefundStatus, type SectorInsights } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { SavedSnippets } from './components/SavedSnippets';
 import { AdminConsole } from './components/AdminConsole';
+import { SectorInsightsCard, goalWinRate } from './components/SectorInsights';
 import { useUsageConfirm } from './components/UsageConfirm';
 import { SaveToLibrary } from './components/SaveToLibrary';
 import { ChannelPanel } from './components/ChannelPanel';
@@ -134,6 +135,7 @@ function App() {
   const [verifyState, setVerifyState] = useState<'idle' | 'verifying' | 'failed'>('idle');
   const [synced, setSynced] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [insights, setInsights] = useState<SectorInsights | null>(null);
   const [consented, setConsented] = useState(() => loadLocal<string>('nurj-consent', '') === LEGAL_VERSION);
   const legalKey = legalFromPath(window.location.pathname);
 
@@ -167,6 +169,7 @@ function App() {
 
       setProfile(merged);
       setIsAdmin(Boolean(status.admin));
+      setInsights(status.insights ?? null);
       setUsage(status.usage);
       setHistory(status.history);
       localStorage.setItem('nurj-profile-v2', JSON.stringify(merged));
@@ -481,6 +484,7 @@ function App() {
                   onNavigate={setScreen}
                   onProfile={setProfile}
                   notify={notify}
+                  insights={insights}
                 />
               )}
               {screen === 'generate' && (
@@ -495,6 +499,7 @@ function App() {
                   onUpgrade={() => setScreen('upgrade')}
                   onSignIn={signIn}
                   notify={notify}
+                  insights={insights}
                 />
               )}
               {screen === 'enhance' && (
@@ -918,6 +923,7 @@ function Dashboard({
   onNavigate,
   onProfile,
   notify,
+  insights,
 }: {
   profile: UserProfile;
   usage: UsageStatus;
@@ -926,6 +932,7 @@ function Dashboard({
   onNavigate: (screen: ScreenKey) => void;
   onProfile: (profile: UserProfile) => void;
   notify: (message: string) => void;
+  insights?: SectorInsights | null;
 }) {
   const stage = STAGES[profile.stage ?? 'launch'];
   const [completed, setCompleted] = useState<number[]>(() => loadLocal('nurj-actions-v2', []));
@@ -1042,6 +1049,7 @@ function Dashboard({
         </article>
       </section>
 
+      <SectorInsightsCard insights={insights} onUseGoal={() => onNavigate('generate')} />
       <WinLog userId={userId} businessId={profile.active_business_id} plan={profile.plan} notify={notify} />
     </div>
   );
@@ -1062,10 +1070,12 @@ function PromptStudio({
   onUpgrade,
   onSignIn,
   notify,
+  insights,
 }: {
   profile: UserProfile;
   usage: UsageStatus;
   authenticated: boolean;
+  insights?: SectorInsights | null;
   userId: string | null;
   onUsage: (usage: UsageStatus) => void;
   onHistory: (item: PromptHistoryItem) => void;
@@ -1231,9 +1241,12 @@ function PromptStudio({
               <div className="goal-grid">
                 {GOALS.map((goalItem) => {
                   const Icon = ICONS[goalItem.icon] ?? Sparkles;
+                  const rate = goalWinRate(insights, goalItem.label);
                   return (
                     <button className={goalId === goalItem.id ? 'selected' : ''} onClick={() => setGoalId(goalItem.id)} key={goalItem.id}>
-                      <span><Icon size={19} /></span><strong>{goalItem.label}</strong><p>{goalItem.description}</p><i><Check size={12} /></i>
+                      <span><Icon size={19} /></span><strong>{goalItem.label}</strong><p>{goalItem.description}</p>
+                      {rate && <small className="goal-rate">{rate.worked_pct}% in your sector said it worked ({rate.reports})</small>}
+                      <i><Check size={12} /></i>
                     </button>
                   );
                 })}
@@ -1405,7 +1418,7 @@ function Guides({ stageKey, plan, onUpgrade }: { stageKey: StageKey; plan: PlanK
         <div className="guide-sections">
           {GUIDES[activeStage].map((section, index) => (
             <article className={`guide-section panel ${open === index ? 'open' : ''}`} key={section.title}>
-              <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks</small></div><ChevronDown size={18} /></button>
+              <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks · {section.items.filter((item) => item.free).length} free</small></div><ChevronDown size={18} /></button>
               <AnimatePresence initial={false}>{open === index && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="guide-items">{section.items.map((item) => { const locked = !item.free && plan === 'free'; return <button className={locked ? 'locked' : ''} key={item.title} onClick={() => (locked ? onUpgrade() : setReading(item))}><span className="guide-play"><BookOpen size={15} /></span><div><strong>{item.title}</strong><p>{item.description}</p><small>{item.minutes} min read · {locked ? 'Builder' : 'Available'}</small></div><ArrowRight size={15} /></button>; })}</motion.div>}</AnimatePresence>
             </article>
           ))}

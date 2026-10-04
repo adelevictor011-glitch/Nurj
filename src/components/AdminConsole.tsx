@@ -109,6 +109,20 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
         <article className="panel"><span>AI tokens</span><strong>{number(o.tokens_today)}</strong><small>today · {number(o.tokens_30d)} in 30 days</small></article>
       </section>
 
+      {data.insights && (
+        <section className="panel">
+          <div className="panel-title"><div><span className="eyebrow">BATCH 5 · SECTOR INSIGHTS</span><h3>Progress to the 30-report threshold</h3></div><span>Insights switch on by themselves</span></div>
+          {data.insights.length ? (
+            <table className="admin-table">
+              <thead><tr><th>Sector</th><th>Reports (6 months)</th><th>Best goal</th><th>Live goals</th></tr></thead>
+              <tbody>{data.insights.map((row) => (
+                <tr key={row.category}><td>{row.category.replaceAll('_', ' ')}</td><td>{number(row.reports)}</td><td>{row.best_goal_reports ?? 0} / 30</td><td>{row.live_goals}</td></tr>
+              ))}</tbody>
+            </table>
+          ) : <p className="admin-empty">No outcome reports yet. They come from "Did it work?" after a run.</p>}
+        </section>
+      )}
+
       {data.features && (
         <section className="panel">
           <div className="panel-title"><div><span className="eyebrow">FEATURE USE</span><h3>Batches 2 to 4</h3></div>

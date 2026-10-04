@@ -135,6 +135,7 @@ export const GUIDES: Record<StageKey, GuideSection[]> = {
         { title: 'The five-question idea filter', description: 'A fast way to decide whether an idea deserves six months of your life.', minutes: 7, free: true },
         { title: 'Define one buyer, not a market', description: 'Narrow the person, moment and pain until outreach becomes obvious.', minutes: 9, free: true },
         { title: 'Praise versus purchase intent', description: 'How to identify commitment signals hidden inside customer conversations.', minutes: 8 },
+        { title: 'Size the opportunity on one page', description: 'Back-of-envelope naira maths to check the prize is worth the effort.', minutes: 10 },
       ],
     },
     {
@@ -143,24 +144,57 @@ export const GUIDES: Record<StageKey, GuideSection[]> = {
         { title: 'Book ten interviews in seven days', description: 'A practical WhatsApp, DM and in-person outreach sequence.', minutes: 11, free: true },
         { title: 'Questions that reveal real pain', description: 'Replace hypothetical questions with behaviour and consequence questions.', minutes: 10 },
         { title: 'Turn interviews into a pilot', description: 'Translate repeated language into one narrow paid experiment.', minutes: 12 },
+        { title: 'Test demand on WhatsApp Status', description: 'Use Status, groups and broadcast lists to see who actually asks to buy.', minutes: 8 },
+      ],
+    },
+    {
+      title: 'Test before you build',
+      items: [
+        { title: 'Pre-sell before you produce', description: 'Take deposits or paid pre-orders before spending on stock or tools.', minutes: 9 },
+        { title: 'A ₦10,000 demand test', description: 'Spend a small, fixed amount to measure real interest, and read the result honestly.', minutes: 8 },
+        { title: 'Test price with three numbers', description: 'Find what people will actually pay before you print a price list.', minutes: 8 },
+      ],
+    },
+    {
+      title: 'Set up right from day one',
+      items: [
+        { title: 'CAC business name registration in plain English', description: 'What to register, when it is worth it, and how the online process works.', minutes: 9 },
+        { title: 'Separate business money from personal money', description: 'One account, one simple record, so you always know if you are making money.', minutes: 8 },
       ],
     },
   ],
   launch: [
     {
-      title: 'Offer and pipeline',
+      title: 'Get clients',
       items: [
         { title: 'Your first ten clients', description: 'Build a weekly outreach rhythm across warm contacts, DMs and referrals.', minutes: 12, free: true },
         { title: 'Cold messages that earn replies', description: 'Observation, relevance, proof and an easy next step.', minutes: 8, free: true },
         { title: 'Follow up without chasing', description: 'A three-touch sequence that keeps dignity and increases response rate.', minutes: 7 },
+        { title: 'Sell daily on WhatsApp Status', description: 'A simple posting rhythm that turns your contacts into a steady trickle of orders.', minutes: 9 },
       ],
     },
     {
-      title: 'Close professionally',
+      title: 'Pricing and offers',
       items: [
         { title: 'Price the outcome', description: 'Move beyond hours and create three packages buyers can compare.', minutes: 11, free: true },
+        { title: 'Build an offer people say yes to', description: 'Bundle the outcome, the proof and the guarantee into one clear deal.', minutes: 8 },
+        { title: 'Discounts without killing your margin', description: 'When to discount, how much, and what to ask for in return.', minutes: 8 },
+      ],
+    },
+    {
+      title: 'Look professional',
+      items: [
+        { title: 'A one-page presence that sells', description: 'WhatsApp Business catalogue, Instagram bio and a link that does the selling.', minutes: 8 },
+        { title: 'Invoices, receipts and simple records', description: 'Look established and get paid faster with clean paperwork.', minutes: 8 },
+        { title: 'Collect testimonials that convince', description: 'Ask at the right moment, get permission, and use proof that feels real.', minutes: 8 },
+      ],
+    },
+    {
+      title: 'Sell and close',
+      items: [
         { title: 'The 20-minute proposal', description: 'A concise proposal structure that reduces confusion and delay.', minutes: 9 },
         { title: 'Deposits and payment terms', description: 'Protect cash flow with clear Nigerian-market payment language.', minutes: 8 },
+        { title: 'Handle "it is too expensive"', description: 'Respond to price objections without dropping your price.', minutes: 9 },
       ],
     },
   ],
@@ -181,6 +215,23 @@ export const GUIDES: Record<StageKey, GuideSection[]> = {
         { title: 'A content system that compounds', description: 'Publish one insight each week that demonstrates commercial judgment.', minutes: 8 },
       ],
     },
+    {
+      title: 'Team and delegation',
+      items: [
+        { title: 'Your first hire or freelancer', description: 'Write the role, run a paid trial task, and agree terms before day one.', minutes: 10 },
+        { title: 'Delegate without losing quality', description: 'Hand work over with checklists and examples, then inspect instead of redoing.', minutes: 8 },
+        { title: 'Staff, contractors and the law: the basics', description: 'Employment letters, pension and PAYE in plain language, and when to get help.', minutes: 10 },
+      ],
+    },
+    {
+      title: 'Money and compliance',
+      items: [
+        { title: 'Know your numbers every month', description: 'A one-page monthly profit, cash and margin check you can do in an hour.', minutes: 8 },
+        { title: 'Small business tax basics under the 2025 tax laws', description: 'TIN, what the new rules mean for small businesses, and records to keep.', minutes: 10 },
+        { title: 'Get paid on time', description: 'Stop late payments with terms, reminders and a firm but polite escalation.', minutes: 8 },
+        { title: 'When to register a limited company', description: 'Business name versus Ltd: liability, credibility, cost and the right moment to switch.', minutes: 9 },
+      ],
+    },
   ],
   exit: [
     {
@@ -197,6 +248,23 @@ export const GUIDES: Record<StageKey, GuideSection[]> = {
         { title: 'Your 90-day exit countdown', description: 'Turn an exit date into weekly commercial and operational milestones.', minutes: 13 },
         { title: 'Resign without burning the bridge', description: 'Protect reputation and leave room for your employer to become a client.', minutes: 7 },
         { title: 'The first 30 days full-time', description: 'Build structure before freedom turns into reactive work.', minutes: 9 },
+      ],
+    },
+    {
+      title: 'Protect yourself',
+      items: [
+        { title: 'Read your employment contract first', description: 'Side-business, confidentiality, non-compete and IP clauses to check before you resign.', minutes: 10 },
+        { title: 'Health cover, pension and savings after the payslip', description: 'Replace what your employer quietly provided, before you need it.', minutes: 10 },
+        { title: 'Your personal tax once you leave PAYE', description: 'Register, file and pay as a self-employed person under the new rules.', minutes: 9 },
+      ],
+    },
+    {
+      title: 'People and timing',
+      items: [
+        { title: 'Tell your family you are going full-time', description: 'A conversation plan with numbers, so support replaces worry.', minutes: 9, free: true },
+        { title: 'Build your support circle', description: 'Mentors, peers and accountability that keep you moving when it gets quiet.', minutes: 8 },
+        { title: 'Signs you are ready to quit, and signs you are not', description: 'A clear checklist so the decision rests on evidence, not frustration.', minutes: 8 },
+        { title: 'Negotiate a part-time or contract exit', description: 'Ask your employer for a gradual transition that pays you while you build.', minutes: 8 },
       ],
     },
   ],

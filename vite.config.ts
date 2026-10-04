@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { guidePagesPlugin } from './build/guidePages';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), guidePagesPlugin()],
   server: {
     port: 5173,
   },
