@@ -17,6 +17,8 @@ jobs:
       # npm cache cannot run. Install the same way Vercel does.
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
-      - run: npx tsc -p tsconfig.api.json
+      # api/ functions inline shared helpers (Vercel bundles each one alone),
+      # so unused-helper warnings are expected there; real type errors are not.
+      - run: npx tsc -p tsconfig.api.json --noUnusedLocals false --noUnusedParameters false
       - run: npm test
       - run: npm run build
