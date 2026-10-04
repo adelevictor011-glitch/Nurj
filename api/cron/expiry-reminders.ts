@@ -16,7 +16,7 @@ const env = {
   // Groq is OpenAI-compatible. Set OPENAI_BASE_URL to Groq's endpoint and
   // OPENAI_API_KEY to a gsk_... key. Leave both unset to use real OpenAI.
   get openaiBaseUrl() { return process.env.OPENAI_BASE_URL || undefined; },
-  get openaiModel() { return process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile'; },
+  get openaiModel() { return process.env.OPENAI_MODEL || 'openai/gpt-oss-120b'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
   get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.

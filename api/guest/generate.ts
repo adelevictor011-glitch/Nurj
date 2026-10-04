@@ -18,7 +18,8 @@ const env = {
   // Groq is OpenAI-compatible. Set OPENAI_BASE_URL to Groq's endpoint and
   // OPENAI_API_KEY to a gsk_... key. Leave both unset to use real OpenAI.
   get openaiBaseUrl() { return process.env.OPENAI_BASE_URL || undefined; },
-  get openaiModel() { return process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile'; },
+  get openaiModel() { return process.env.OPENAI_MODEL || 'openai/gpt-oss-120b'; },
+  get openaiFallbackModel() { return process.env.OPENAI_MODEL_FALLBACK || 'openai/gpt-oss-20b'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
   get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.
@@ -83,13 +84,129 @@ class AuthError extends Error {}
 let client: OpenAI | null = null;
 
 function openai() {
-  client ??= new OpenAI({ apiKey: env.openaiApiKey, baseURL: env.openaiBaseUrl });
+  client ??= new OpenAI({ apiKey: env.openaiApiKey, baseURL: env.openaiBaseUrl, maxRetries: 1 });
   return client;
+}
+
+// ---- spend guardrails and model failover (roadmap feature 19) ----
+// A daily AI budget in tokens, counted per Lagos day from model_usage:
+//   below 80%   -> primary model, falling back to the cheaper one on an outage
+//   80% to 100% -> cheaper model only
+//   over 100%   -> free and guest calls pause until midnight WAT; paid calls
+//                  continue on the cheaper model
+// Reading the spend fails open: a telemetry hiccup must never block users.
+
+class SpendPausedError extends Error {}
+class UpstreamError extends Error {}
+
+type SpendLevel = 'normal' | 'degrade' | 'paused';
+
+interface ModelUsage { model: string; inputTokens: number; outputTokens: number; totalTokens: number }
+
+function dailyTokenBudget(): number {
+  const value = Number(process.env.AI_DAILY_TOKEN_BUDGET);
+  return Number.isFinite(value) && value > 0 ? value : 2_000_000;
+}
+
+async function spendLevel(supabase: SupabaseClient): Promise<SpendLevel> {
+  const { data, error } = await supabase.rpc('ai_tokens_today');
+  if (error) {
+    console.error('[spend] could not read today\'s spend', error.message);
+    return 'normal';
+  }
+  const used = Number(data ?? 0);
+  const budget = dailyTokenBudget();
+  const level: SpendLevel = used >= budget ? 'paused' : used >= budget * 0.8 ? 'degrade' : 'normal';
+  if (level !== 'normal') await alertOnce(supabase, level, used, budget);
+  return level;
+}
+
+async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: number, budget: number) {
+  try {
+    const { data: claimed, error } = await supabase.rpc('claim_spend_alert', { p_level: level });
+    if (error || !claimed) return;
+    const percent = Math.round((used / budget) * 100);
+    const message =
+      `Nurj AI spend is at ${percent}% of today's budget ` +
+      `(${used.toLocaleString('en-NG')} of ${budget.toLocaleString('en-NG')} tokens). ` +
+      (level === 'paused'
+        ? 'Free and guest AI calls are paused until midnight WAT. Paid users continue on the cheaper model.'
+        : 'New AI calls now use the cheaper model.');
+    console.warn('[spend]', message);
+    const resendKey = process.env.RESEND_API_KEY;
+    const from = process.env.REMINDER_FROM_EMAIL;
+    const to = process.env.ADMIN_ALERT_EMAIL;
+    if (!resendKey || !from || !to) return;
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to, subject: `Nurj AI spend at ${percent}% of today's budget`, text: message }),
+    });
+  } catch (error) {
+    console.error('[spend] alert failed', safeMessage(error));
+  }
+}
+
+function modelChain(level: SpendLevel): string[] {
+  const chain = level === 'normal' ? [env.openaiModel, env.openaiFallbackModel] : [env.openaiFallbackModel];
+  return chain.filter((model, index, all) => Boolean(model) && all.indexOf(model) === index);
+}
+
+function isRetryable(error: unknown): boolean {
+  const e = error as { status?: number; code?: string; message?: string };
+  const status = e?.status ?? 0;
+  if (status === 404 || status === 408 || status === 429 || status >= 500) return true;
+  if (e?.code === 'model_not_found') return true;
+  const message = (e?.message ?? '').toLowerCase();
+  return ['does not exist', 'model_not_found', 'decommissioned', 'timeout', 'timed out', 'fetch failed', 'empty response']
+    .some((needle) => message.includes(needle));
+}
+
+async function callModel(params: { level: SpendLevel; system: string; user: string; json: boolean }): Promise<{ content: string; usage: ModelUsage }> {
+  const models = modelChain(params.level);
+  for (let index = 0; index < models.length; index++) {
+    const model = models[index];
+    try {
+      const response = await openai().chat.completions.create({
+        model,
+        ...(params.json ? { response_format: { type: 'json_object' as const } } : {}),
+        messages: [
+          { role: 'system', content: params.system },
+          { role: 'user', content: params.user },
+        ],
+      });
+      const content = response.choices?.[0]?.message?.content?.trim();
+      if (!content) throw new Error('The AI returned an empty response.');
+      return {
+        content,
+        usage: {
+          model,
+          inputTokens: response.usage?.prompt_tokens ?? 0,
+          outputTokens: response.usage?.completion_tokens ?? 0,
+          totalTokens: response.usage?.total_tokens ?? 0,
+        },
+      };
+    } catch (error) {
+      console.error(`[ai] model "${model}" failed`, safeMessage(error));
+      if (index < models.length - 1 && isRetryable(error)) continue;
+      break;
+    }
+  }
+  throw new UpstreamError('Nurj could not reach the AI right now. Please try again in a moment.');
 }
 
 interface StructuredResult<T> {
   data: T;
-  usage: { model: string; inputTokens: number; outputTokens: number; totalTokens: number };
+  usage: ModelUsage;
+}
+
+function parseJsonObject<T>(content: string): T {
+  const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    throw new UpstreamError('The AI returned an unreadable response. Please try again.');
+  }
 }
 
 async function createStructuredResponse<T>(params: {
@@ -97,38 +214,21 @@ async function createStructuredResponse<T>(params: {
   instructions: string;
   input: string;
   schema: Record<string, unknown>;
+  level: SpendLevel;
 }): Promise<StructuredResult<T>> {
-  const model = env.openaiModel;
-  // Chat Completions + JSON mode: OpenAI-compatible and works on Groq.
-  // The schema is described in the system message since Groq's JSON mode
-  // guarantees valid JSON but not a specific schema.
-  const response = await openai().chat.completions.create({
-    model,
-    response_format: { type: 'json_object' },
-    messages: [
-      {
-        role: 'system',
-        content:
-          params.instructions +
-          '\n\nRespond with a single valid JSON object and nothing else. It must match exactly this shape: ' +
-          JSON.stringify(params.schema),
-      },
-      { role: 'user', content: params.input },
-    ],
+  // Chat Completions + JSON mode works on OpenAI and Groq. The schema is
+  // described in the system message because JSON mode guarantees valid JSON,
+  // not a particular shape.
+  const { content, usage } = await callModel({
+    level: params.level,
+    json: true,
+    system:
+      params.instructions +
+      '\n\nRespond with a single valid JSON object and nothing else. It must match exactly this shape: ' +
+      JSON.stringify(params.schema),
+    user: params.input,
   });
-
-  const content = response.choices?.[0]?.message?.content;
-  if (!content) throw new Error('The AI returned an empty response.');
-
-  return {
-    data: JSON.parse(content) as T,
-    usage: {
-      model,
-      inputTokens: response.usage?.prompt_tokens ?? 0,
-      outputTokens: response.usage?.completion_tokens ?? 0,
-      totalTokens: response.usage?.total_tokens ?? 0,
-    },
-  };
+  return { data: parseJsonObject<T>(content), usage };
 }
 
 interface GeneratedPayload {
@@ -286,6 +386,8 @@ export async function POST(request: Request): Promise<Response> {
     const stage = assertText(body.stage, 'Stage', 30, false) || 'launch';
     const category = assertText(body.category, 'Category', 40, false);
 
+    const level = await spendLevel(supabase);
+    if (level === 'paused') throw new SpendPausedError("Nurj has reached today's free preview capacity. Sign in with Google, or try again after midnight.");
     await consumeGuestQuota(supabase, fingerprint);
     consumed = true;
 
@@ -294,6 +396,7 @@ export async function POST(request: Request): Promise<Response> {
       schema: generateSchema,
       instructions: GENERATE_INSTRUCTIONS,
       input: buildGenerateInput({ stage, goal, business, customer, context, mentor, category }),
+      level,
     });
 
     logModelUsage(supabase, { userId: null, kind: 'guest_generate', usage });
@@ -303,6 +406,7 @@ export async function POST(request: Request): Promise<Response> {
     if (consumed && fingerprint && !(error instanceof GuestQuotaError)) {
       await refundGuestQuota(supabase, fingerprint);
     }
-    return fail(safeMessage(error), error instanceof GuestQuotaError ? 429 : 400);
+    const status = error instanceof GuestQuotaError ? 429 : error instanceof SpendPausedError ? 503 : error instanceof UpstreamError ? 502 : 400;
+    return fail(safeMessage(error), status);
   }
 }
