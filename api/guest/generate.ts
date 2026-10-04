@@ -170,6 +170,10 @@ async function callModel(params: { level: SpendLevel; system: string; user: stri
       const response = await openai().chat.completions.create({
         model,
         ...(params.json ? { response_format: { type: 'json_object' as const } } : {}),
+        // Hard cap on reply length (reasoning included) so one call can never
+        // run up the bill; lighter reasoning once spend is high.
+        max_completion_tokens: params.json ? 4000 : 6000,
+        ...(params.level !== 'normal' ? { reasoning_effort: 'low' as const } : {}),
         messages: [
           { role: 'system', content: params.system },
           { role: 'user', content: params.user },

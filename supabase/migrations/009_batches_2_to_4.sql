@@ -648,3 +648,23 @@ $$;
 
 revoke all on function public.refund_daily_quota(uuid, text) from public, anon, authenticated;
 grant execute on function public.refund_daily_quota(uuid, text) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 8. Per-user 30-day token total, for the monthly plan budget in the AI
+--    functions (past it, that user moves to the cheaper model).
+-- ---------------------------------------------------------------------------
+
+create or replace function public.user_tokens_30d(p_user uuid)
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(sum(total_tokens), 0)::bigint
+  from public.model_usage
+  where user_id = p_user and created_at > now() - interval '30 days';
+$$;
+
+revoke all on function public.user_tokens_30d(uuid) from public, anon, authenticated;
+grant execute on function public.user_tokens_30d(uuid) to service_role;

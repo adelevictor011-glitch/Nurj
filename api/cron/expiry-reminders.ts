@@ -119,9 +119,18 @@ async function allEmails(supabase: SupabaseClient): Promise<Map<string, string>>
   return emails;
 }
 
-async function sendMondayDigest(supabase: SupabaseClient, force: boolean) {
+// Free email plans cap daily sends (Resend free: 100 a day; Brevo free: 300).
+// EMAIL_DAILY_LIMIT keeps the job under that cap; if more people are due, the
+// digest carries on Tuesday to Thursday until everyone has this week's email.
+function emailDailyLimit(): number {
+  const value = Number(process.env.EMAIL_DAILY_LIMIT);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 90;
+}
+
+async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget: number) {
   const weekday = new Date().toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', weekday: 'long' });
-  if (weekday !== 'Monday' && !force) return { skipped: 'not Monday' };
+  if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday'].includes(weekday) && !force) return { skipped: 'not a digest day' };
+  if (budget <= 0) return { skipped: 'daily email limit reached' };
 
   const resendKey = process.env.RESEND_API_KEY;
   const from = process.env.REMINDER_FROM_EMAIL;
@@ -132,7 +141,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean) {
   // Aggregated in SQL (migration 009): no row caps, fairest-first ordering,
   // and people who already had their one win-back are excluded.
   const [{ data: candidates, error }, emails] = await Promise.all([
-    supabase.rpc('digest_candidates', { p_limit: 500 }),
+    supabase.rpc('digest_candidates', { p_limit: Math.min(budget, 500) }),
     allEmails(supabase),
   ]);
   if (error) throw new Error('Digest candidates could not be read.');
@@ -276,7 +285,8 @@ export async function GET(request: Request): Promise<Response> {
     const expiry = await sendExpiryReminders(supabase);
     let digest: unknown;
     try {
-      digest = await sendMondayDigest(supabase, force);
+      const expirySent = Number((expiry as { sent?: number }).sent ?? 0);
+      digest = await sendMondayDigest(supabase, force, emailDailyLimit() - expirySent);
     } catch (digestError) {
       console.error('[digest] failed', safeMessage(digestError));
       digest = { error: safeMessage(digestError) };

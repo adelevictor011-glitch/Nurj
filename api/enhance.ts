@@ -200,6 +200,25 @@ async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: numb
   }
 }
 
+// Per-user monthly budget (protects plan margin). Past it, that user's calls
+// quietly move to the cheaper model; nothing is blocked. Budgets are tokens
+// over the last 30 days: AI_MONTHLY_TOKENS_BUILDER (default 2,500,000) and
+// AI_MONTHLY_TOKENS_OPERATOR (default 6,000,000).
+function monthlyTokenBudget(plan: string): number | null {
+  const fallback = plan === 'operator' ? 6_000_000 : plan === 'builder' ? 2_500_000 : null;
+  if (fallback === null) return null;
+  const value = Number(plan === 'operator' ? process.env.AI_MONTHLY_TOKENS_OPERATOR : process.env.AI_MONTHLY_TOKENS_BUILDER);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+async function personalLevel(supabase: SupabaseClient, userId: string, plan: string, level: SpendLevel): Promise<SpendLevel> {
+  const budget = monthlyTokenBudget(plan);
+  if (budget === null || level !== 'normal') return level;
+  const { data, error } = await supabase.rpc('user_tokens_30d', { p_user: userId });
+  if (error) return level;
+  return Number(data ?? 0) >= budget ? 'degrade' : level;
+}
+
 function modelChain(level: SpendLevel): string[] {
   const chain = level === 'normal' ? [env.openaiModel, env.openaiFallbackModel] : [env.openaiFallbackModel];
   return chain.filter((model, index, all) => Boolean(model) && all.indexOf(model) === index);
@@ -223,6 +242,10 @@ async function callModel(params: { level: SpendLevel; system: string; user: stri
       const response = await openai().chat.completions.create({
         model,
         ...(params.json ? { response_format: { type: 'json_object' as const } } : {}),
+        // Hard cap on reply length (reasoning included) so one call can never
+        // run up the bill; lighter reasoning once spend is high.
+        max_completion_tokens: params.json ? 4000 : 6000,
+        ...(params.level !== 'normal' ? { reasoning_effort: 'low' as const } : {}),
         messages: [
           { role: 'system', content: params.system },
           { role: 'user', content: params.user },
@@ -453,9 +476,10 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     quotaKind = mode === 'enhance' ? 'enhance' : 'prompt';
-    const level = await spendLevel(supabase);
+    let level = await spendLevel(supabase);
     const quota = await consumeQuota(supabase, user.id, quotaKind);
     quotaConsumed = true;
+    level = await personalLevel(supabase, user.id, quota.plan, level);
     if (level === 'paused' && quota.plan === 'free') throw new SpendPausedError("Nurj has reached today's free AI capacity. Your free prompts come back at midnight, or upgrade to keep going now.");
 
     if (mode === 'enhance' || mode === 'refine') {

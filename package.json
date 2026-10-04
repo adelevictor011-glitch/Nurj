@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
+    "docx": "^9.7.1",
     "framer-motion": "^12.23.12",
     "lucide-react": "^0.544.0",
     "openai": "^5.23.2",

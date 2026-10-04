@@ -71,7 +71,7 @@ export function ChannelPanel({
         </label>
         <button type="button" className="button button-secondary button-small" disabled={busy} onClick={reshape}>{busy ? 'Reshaping…' : 'Make it channel-ready'}</button>
         <button type="button" className="copy-button" onClick={() => exportPdf(title, text)}>PDF</button>
-        <button type="button" className="copy-button" onClick={() => exportWord(title, text)}>Word</button>
+        <button type="button" className="copy-button" onClick={() => { exportWord(title, text).catch(() => notify('The Word file could not be created. Try again.')); }}>Word (.docx)</button>
       </div>
       {result && result.channel === channel && (
         <div className="channel-result">
