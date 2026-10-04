@@ -133,6 +133,7 @@ function App() {
   useEffect(() => {
     // Close the phone menu if the screen grows into the desktop layout, so it
     // never stays open (and locking the page) where it can't be seen.
+    if (typeof window.matchMedia !== 'function') return undefined;
     const wide = window.matchMedia('(min-width: 821px)');
     const onChange = () => { if (wide.matches) setMobileMenu(false); };
     wide.addEventListener('change', onChange);
