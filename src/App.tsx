@@ -42,6 +42,7 @@ import { GUIDE_CONTENT } from './guides-content';
 import { api } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { SavedSnippets } from './components/SavedSnippets';
 import type {
   EnhanceResult,
   GenerateResult,
@@ -418,6 +419,7 @@ function App() {
                   profile={profile}
                   usage={usage}
                   authenticated={Boolean(user)}
+                  userId={user?.id ?? null}
                   onUsage={setUsage}
                   onHistory={(item) => setHistory((items) => [item, ...items])}
                   onProfile={setProfile}
@@ -930,6 +932,7 @@ function PromptStudio({
   profile,
   usage,
   authenticated,
+  userId,
   onUsage,
   onHistory,
   onProfile,
@@ -940,6 +943,7 @@ function PromptStudio({
   profile: UserProfile;
   usage: UsageStatus;
   authenticated: boolean;
+  userId: string | null;
   onUsage: (usage: UsageStatus) => void;
   onHistory: (item: PromptHistoryItem) => void;
   onProfile: (profile: UserProfile) => void;
@@ -1014,13 +1018,10 @@ function PromptStudio({
       }
       setResult(nextResult);
       onUsage({ ...usage, prompt: { ...usage.prompt, used: usage.prompt.used + 1, remaining: nextResult.remaining } });
-      onProfile({
-        ...profile,
-        business_description: business,
-        target_customer: customer,
-        business_category: category,
-        momentum_score: Math.min(100, profile.momentum_score + 4),
-      });
+      // Business and audience typed here apply to this prompt only. They are
+      // written to the saved profile only when the user presses
+      // "Save to my profile", never as a side effect of generating.
+      onProfile({ ...profile, momentum_score: Math.min(100, profile.momentum_score + 4) });
       const localId = crypto.randomUUID();
       setHistoryId(localId);
       onHistory({
@@ -1037,6 +1038,36 @@ function PromptStudio({
     } finally {
       setBusy(false);
     }
+  }
+
+  const profileDiffers =
+    business.trim() !== (profile.business_description ?? '').trim() ||
+    customer.trim() !== (profile.target_customer ?? '').trim();
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  async function saveToProfile() {
+    const nextBusiness = business.trim();
+    const nextCustomer = customer.trim();
+    if (!nextBusiness || !nextCustomer) {
+      notify('Add both your business and target audience to save them.');
+      return;
+    }
+    setSavingProfile(true);
+    const nextCategory = classifyBusiness(nextBusiness);
+    if (userId && supabase) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ business_description: nextBusiness, target_customer: nextCustomer, business_category: nextCategory, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+      if (error) {
+        notify(error.message);
+        setSavingProfile(false);
+        return;
+      }
+    }
+    onProfile({ ...profile, business_description: nextBusiness, target_customer: nextCustomer, business_category: nextCategory });
+    notify('Saved to your profile.');
+    setSavingProfile(false);
   }
 
   function reset() {
@@ -1093,8 +1124,18 @@ function PromptStudio({
               <div className="form-grid">
                 <label className="full"><span>Your business <b>required</b></span><input className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-person brand identity studio for Nigerian fashion businesses" /><small>{business ? `Detected intelligence segment: ${classifyBusiness(business).replaceAll('_', ' ')}` : 'Describe the business in one clear sentence.'}</small></label>
                 <label className="full"><span>Target customer <b>required</b></span><input className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="Founder-led fashion brands in Lagos selling through Instagram" /></label>
-                <label><span>Task context <em>optional · this prompt only</em></span><textarea className="field" value={context} maxLength={1800} autoComplete="off" onChange={(event) => setContext(event.target.value)} placeholder="What is happening, what has been tried, important constraints…" /></label>
-                <label><span>Mentors / framework <em>optional · this prompt only</em></span><textarea className="field" value={mentor} maxLength={1500} autoComplete="off" onChange={(event) => setMentor(event.target.value)} placeholder="A framework or expert whose principles are relevant—not an imitation request." /></label>
+                <div className="full profile-save-row">
+                  <small>Business and audience edits here apply to this prompt only.</small>
+                  {profileDiffers && <button type="button" className="button button-secondary button-small" disabled={savingProfile} onClick={() => void saveToProfile()}>{savingProfile ? 'Saving…' : 'Save to my profile'}</button>}
+                </div>
+                <div>
+                  <label><span>Task context <em>optional · this prompt only</em></span><textarea className="field" value={context} maxLength={1800} autoComplete="off" onChange={(event) => setContext(event.target.value)} placeholder="What is happening, what has been tried, important constraints…" /></label>
+                  <SavedSnippets kind="context" value={context} maxLength={1800} userId={userId} onPick={setContext} notify={notify} />
+                </div>
+                <div>
+                  <label><span>Mentors / framework <em>optional · this prompt only</em></span><textarea className="field" value={mentor} maxLength={1500} autoComplete="off" onChange={(event) => setMentor(event.target.value)} placeholder="A framework or expert whose principles are relevant—not an imitation request." /></label>
+                  <SavedSnippets kind="mentor" value={mentor} maxLength={1500} userId={userId} onPick={setMentor} notify={notify} />
+                </div>
               </div>
               <div className="context-summary"><Gauge size={17} /><div><strong>Context quality</strong><span>{business && customer ? context ? 'High signal' : 'Good foundation' : 'Needs required details'}</span></div><i style={{ width: business && customer ? context ? '92%' : '68%' : '20%' }} /></div>
               {wall === 'quota' && (
@@ -1330,25 +1371,91 @@ function Account({
   const [business, setBusiness] = useState(profile.business_description ?? '');
   const [customer, setCustomer] = useState(profile.target_customer ?? '');
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    const next = { ...profile, display_name: name, business_description: business, target_customer: customer, business_category: classifyBusiness(business) };
+  const dirty =
+    name.trim() !== (profile.display_name ?? '').trim() ||
+    business.trim() !== (profile.business_description ?? '').trim() ||
+    customer.trim() !== (profile.target_customer ?? '').trim();
+
+  // "Save" writes to the profile. "Done editing" only leaves edit mode and
+  // never writes: with unsaved changes it asks first, so nothing is saved or
+  // thrown away by accident.
+  async function save(event?: FormEvent): Promise<boolean> {
+    event?.preventDefault();
+    if (!dirty) return true;
+    const next = { ...profile, display_name: name.trim(), business_description: business.trim(), target_customer: customer.trim(), business_category: classifyBusiness(business) };
     setSaving(true);
     if (user && supabase) {
-      const { error } = await supabase.from('profiles').update({ display_name: name, business_description: business, target_customer: customer, business_category: classifyBusiness(business), updated_at: new Date().toISOString() }).eq('id', user.id);
-      if (error) { notify(error.message); setSaving(false); return; }
+      const { error } = await supabase.from('profiles').update({ display_name: next.display_name, business_description: next.business_description, target_customer: next.target_customer, business_category: next.business_category, updated_at: new Date().toISOString() }).eq('id', user.id);
+      if (error) { notify(error.message); setSaving(false); return false; }
     }
     onProfile(next);
     notify('Workspace profile saved.');
     setSaving(false);
+    return true;
+  }
+
+  function doneEditing() {
+    if (dirty) {
+      setConfirmLeave(true);
+      return;
+    }
+    setEditing(false);
+  }
+
+  function discardChanges() {
+    setName(profile.display_name ?? '');
+    setBusiness(profile.business_description ?? '');
+    setCustomer(profile.target_customer ?? '');
+    setConfirmLeave(false);
+    setEditing(false);
+  }
+
+  async function saveAndFinish() {
+    if (await save()) {
+      setConfirmLeave(false);
+      setEditing(false);
+    }
   }
 
   return (
     <div className="screen-stack account-screen">
       <section className="screen-heading"><div><span className="eyebrow">WORKSPACE SETTINGS</span><h1>Keep Nurj close to the business.</h1><p>Your saved context makes every future prompt faster and more specific.</p></div></section>
       <section className="account-grid">
-        <form className="panel account-form" onSubmit={save}><div className="panel-title"><div><span className="eyebrow">BUSINESS PROFILE</span><h3>Core context</h3></div><Settings2 size={18} /></div><label><span>Your name</span><input className="field" value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Business description</span><textarea className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="What you sell and the outcome it creates" /></label><label><span>Target audience</span><textarea className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="The specific people or companies you serve" /></label><button className="button button-primary" disabled={saving}>{saving ? 'Saving…' : 'Save workspace'}</button></form>
+        <form className="panel account-form" onSubmit={save}>
+          <div className="panel-title"><div><span className="eyebrow">BUSINESS PROFILE</span><h3>Core context</h3></div><Settings2 size={18} /></div>
+          {editing ? (
+            <>
+              <label><span>Your name</span><input className="field" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label>
+              <label><span>Business description</span><textarea className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="What you sell and the outcome it creates" /></label>
+              <label><span>Target audience</span><textarea className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="The specific people or companies you serve" /></label>
+              {confirmLeave ? (
+                <div className="account-confirm" role="alert">
+                  <strong>You have unsaved changes.</strong>
+                  <div>
+                    <button type="button" className="button button-primary button-small" disabled={saving} onClick={() => void saveAndFinish()}>Save and finish</button>
+                    <button type="button" className="button button-ghost button-small" onClick={discardChanges}>Discard changes</button>
+                    <button type="button" className="button button-ghost button-small" onClick={() => setConfirmLeave(false)}>Keep editing</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="account-actions">
+                  <button className="button button-primary" disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</button>
+                  <button type="button" className="button button-ghost" onClick={doneEditing}>Done editing</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="account-readonly"><span>Your name</span><p>{profile.display_name || 'Not set'}</p></div>
+              <div className="account-readonly"><span>Business description</span><p>{profile.business_description || 'Not set yet'}</p></div>
+              <div className="account-readonly"><span>Target audience</span><p>{profile.target_customer || 'Not set yet'}</p></div>
+              <div className="account-actions"><button type="button" className="button button-secondary" onClick={() => setEditing(true)}>Edit details</button></div>
+            </>
+          )}
+        </form>
         <div className="account-side">
           <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
           <article className="panel security-card"><ShieldCheck size={21} /><div><strong>Secure by design</strong><p>Secret AI and payment keys remain inside Vercel Functions. Paid-plan fields cannot be edited from the browser.</p></div></article>

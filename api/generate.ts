@@ -315,10 +315,9 @@ export async function POST(request: Request): Promise<Response> {
 
     void supabase
       .from('profiles')
+      // Business / audience typed for one prompt must never replace the saved
+      // profile; only an explicit save in the app does that.
       .update({
-        business_description: business,
-        target_customer: customer,
-        ...(category ? { business_category: category } : {}),
         last_active_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })

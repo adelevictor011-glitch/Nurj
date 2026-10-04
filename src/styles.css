@@ -720,3 +720,28 @@ textarea.field { min-height: 104px; line-height: 1.55; }
   .guide-reader { max-height: 100vh; border-radius: 0; }
   .guide-reader header, .guide-reader-body { padding-left: 18px; padding-right: 18px; }
 }
+
+/* Saved lists, profile save row, settings edit mode */
+.form-grid > .full { grid-column: 1 / -1; }
+.profile-save-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.profile-save-row small { color: var(--dim); font-size: 9px; }
+.snippets { margin-top: 8px; }
+.snippets-bar { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.snippets-link { background: transparent; border: 0; padding: 4px 0; color: var(--gold); font-size: 10px; cursor: pointer; }
+.snippets-link:disabled { color: var(--dim); cursor: default; }
+.snippets-name { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.snippets-name .field { min-height: 38px; padding: 8px 12px; }
+.snippets-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.snippets-list li { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.snippets-list li.active { border-color: rgba(237,184,76,.4); }
+.snippets-list li > div { flex: 1; min-width: 0; }
+.snippets-list strong { display: block; font-size: 11px; }
+.snippets-list small { display: block; color: var(--dim); font-size: 9px; margin-top: 3px; overflow-wrap: anywhere; }
+.snippets-list .snippets-empty { color: var(--dim); font-size: 10px; border-style: dashed; }
+.account-readonly { margin-top: 14px; }
+.account-readonly span { color: #b6baaf; font-size: 10px; font-weight: 600; }
+.account-readonly p { margin: 5px 0 0; color: var(--text); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.account-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.account-confirm { margin-top: 16px; border: 1px solid rgba(237,184,76,.35); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; font-size: 11px; }
+.account-confirm > div { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 640px) { .snippets-name { flex-wrap: wrap; } }

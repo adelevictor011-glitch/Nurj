@@ -33,6 +33,9 @@ describe('Nurj application shell', () => {
       fireEvent.click(screen.getAllByRole('button').find((button) => button.textContent?.includes('A'))!);
     }
 
+    expect(await screen.findByRole('heading', { name: /tell nurj about your business/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /skip for now/i }));
+
     expect(await screen.findByRole('heading', { name: /your business is in its validation era/i })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /open my command centre/i }));
     expect(await screen.findByText(/highest-leverage move/i)).toBeTruthy();
