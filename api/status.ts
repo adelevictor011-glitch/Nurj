@@ -16,7 +16,7 @@ const env = {
   // Groq is OpenAI-compatible. Set OPENAI_BASE_URL to Groq's endpoint and
   // OPENAI_API_KEY to a gsk_... key. Leave both unset to use real OpenAI.
   get openaiBaseUrl() { return process.env.OPENAI_BASE_URL || undefined; },
-  get openaiModel() { return process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile'; },
+  get openaiModel() { return process.env.OPENAI_MODEL || 'openai/gpt-oss-120b'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
   get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.
@@ -117,11 +117,37 @@ export async function GET(request: Request): Promise<Response> {
         .single();
       if (downgraded) profile = downgraded;
     }
+    // If a lapse or refund locked the business in use, fall back to the
+    // oldest one (always unlocked). No-op before migration 009 is run.
+    if (profile.active_business_id) {
+      const { error: lockError } = await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
+      if (!lockError) {
+        const { data: refreshed } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        if (refreshed) profile = refreshed;
+      }
+    }
     const paid = profile.plan !== 'free' && Boolean(profile.plan_expires_at) && new Date(profile.plan_expires_at) > new Date();
     const promptUsed = usageResult.data?.prompt_count ?? 0;
     const enhanceUsed = usageResult.data?.enhance_count ?? 0;
 
+    // Admin flag only toggles the console link; api/admin re-checks on every call.
+    const { data: adminRow } = await supabase
+      .from('comp_accounts')
+      .select('note')
+      .eq('email', (user.email ?? '').toLowerCase())
+      .maybeSingle();
+
+    // Sector insights (feature 10). Only results with 30+ reports come back,
+    // so they switch on by themselves as reports arrive.
+    let insights: unknown = null;
+    if (profile.business_category) {
+      const { data: insightData, error: insightError } = await supabase.rpc('sector_insights', { p_category: profile.business_category, p_min: 30 });
+      if (!insightError) insights = insightData;
+    }
+
     return json({
+      insights,
+      admin: adminRow?.note === 'admin',
       profile,
       usage: {
         prompt: { used: promptUsed, limit: paid ? null : 5, remaining: paid ? null : Math.max(0, 5 - promptUsed) },

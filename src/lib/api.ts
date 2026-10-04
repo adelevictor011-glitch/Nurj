@@ -23,7 +23,18 @@ async function request<T>(path: string, init: RequestInit = {}, anonymous = fals
   return payload;
 }
 
+export interface SectorInsights {
+  category: string;
+  min_reports: number;
+  total_reports: number;
+  sector_worked_pct: number | null;
+  goals: Array<{ goal: string; reports: number; worked_pct: number }>;
+  closest_goal: { goal: string; reports: number } | null;
+}
+
 export interface StatusResponse {
+  insights?: SectorInsights | null;
+  admin?: boolean;
   profile: UserProfile;
   usage: UsageStatus;
   history: PromptHistoryItem[];
@@ -48,13 +59,98 @@ export const api = {
     request<{ recorded: true }>('/api/outcome', { method: 'POST', body: JSON.stringify(body) }),
   enhance: (body: Record<string, unknown>) =>
     request<EnhanceResult>('/api/enhance', { method: 'POST', body: JSON.stringify(body) }),
-  initializePayment: (plan: 'builder' | 'operator') =>
+  refine: (body: { prompt: string; output: string; complaint: string }) =>
+    request<EnhanceResult>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'refine', ...body }) }),
+  channel: (text: string, channel: string) =>
+    request<ChannelResult>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'channel', text, channel }) }),
+  priceScript: (body: { product: string; oldPrice: string; newPrice: string; reason: string; channel: string }) =>
+    request<ChannelResult>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'script', ...body }) }),
+  pack: () => request<PromptPack>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'pack' }) }),
+  initializePayment: (plan: 'builder' | 'operator' | 'business_addon') =>
     request<{ authorization_url: string; reference: string }>('/api/payments/initialize', {
       method: 'POST',
       body: JSON.stringify({ plan }),
     }),
   verifyPayment: (reference: string) =>
-    request<{ activated: boolean; plan: 'builder' | 'operator'; expires_at: string }>(
+    request<{ activated: boolean; plan: 'builder' | 'operator' | 'business_addon'; expires_at?: string; needs_refund?: boolean; reason?: string }>(
       `/api/payments/verify?reference=${encodeURIComponent(reference)}`,
     ),
+  account: () => request<{ refund: RefundStatus }>('/api/account'),
+  admin: () => request<AdminData>('/api/admin'),
+  adminGrant: (body: { email: string; plan: string; days: number; note: string }) =>
+    request<{ email: string; plan: string; expires_at: string | null }>('/api/admin', { method: 'POST', body: JSON.stringify(body) }),
+  acceptTerms: (version: string) =>
+    request<{ terms_version: string; terms_accepted_at: string }>('/api/account', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'consent', version }),
+    }),
+  requestRefund: (reason: string) =>
+    request<{ status: 'refunded' | 'pending'; message: string }>('/api/account', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'refund', reason }),
+    }),
+  deleteAccount: () =>
+    request<{ deleted: true }>('/api/account', { method: 'POST', body: JSON.stringify({ action: 'delete', confirm: 'DELETE' }) }),
+  async exportData(): Promise<Blob> {
+    const token = await accessToken();
+    const response = await fetch('/api/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ action: 'export' }),
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || 'Your data could not be exported.');
+    }
+    return response.blob();
+  },
 };
+
+export type RefundStatus =
+  | { eligible: true; amount: number; plan: string; deadline: string }
+  | { eligible: false; reason: string };
+
+export interface AdminData {
+  overview: {
+    users_total: number;
+    users_new_7d: number;
+    builder_active: number;
+    operator_active: number;
+    ever_paid: number;
+    revenue_30d_kobo: number;
+    refunds_30d_kobo: number;
+    refunds_pending: number;
+    tokens_today: number;
+    tokens_30d: number;
+    categories: Array<{ name: string; count: number }>;
+    stages: Array<{ name: string; count: number }>;
+    goals_30d: Array<{ goal: string; count: number }>;
+    top_ai_users_30d: Array<{ email: string; plan: string; calls: number; tokens: number }>;
+  };
+  wrap: Array<{ week_start: string; active_users: number; previous_active: number; retained_users: number; wrap: number | null }>;
+  grants: Array<{ target_email: string; plan: string; days: number; granted_by: string; note: string | null; created_at: string }>;
+  features: {
+    saved_prompts: number;
+    wins_logged: number;
+    wins_total_kobo: number;
+    businesses: number;
+    active_addons: number;
+    digest_opted_out: number;
+    payments_needing_refund: number;
+  } | null;
+  insights: Array<{ category: string; reports: number; live_goals: number; best_goal_reports: number | null }> | null;
+}
+
+export interface ChannelResult {
+  channel: string;
+  limit: number;
+  subject: string;
+  text: string;
+  remaining?: number | null;
+}
+
+export interface PromptPack {
+  title: string;
+  month: string;
+  prompts: Array<{ title: string; use_when: string; prompt: string }>;
+}

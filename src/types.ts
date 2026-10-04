@@ -10,6 +10,9 @@ export type ScreenKey =
   | 'guides'
   | 'history'
   | 'account'
+  | 'admin'
+  | 'library'
+  | 'tools'
   | 'upgrade';
 
 export interface QuizOption {
@@ -72,6 +75,10 @@ export interface UserProfile {
   plan_expires_at: string | null;
   onboarding_complete: boolean;
   momentum_score: number;
+  terms_version?: string | null;
+  terms_accepted_at?: string | null;
+  active_business_id?: string | null;
+  digest_opt_out?: boolean;
 }
 
 export interface UsageStatus {

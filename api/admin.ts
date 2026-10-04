@@ -80,42 +80,64 @@ class AuthError extends Error {}
 
 // ---- endpoint ----
 
-/**
- * "Did this actually work?" — one question, and the only data in this product
- * that a competitor cannot clone in a weekend.
- */
+// ---- admin console (roadmap feature 7) ----
+// Admins are comp_accounts rows with note = 'admin'. Every read and write
+// here runs on the server with the service role; the browser never gets
+// direct access to these tables or functions.
+
+class ForbiddenError extends Error {}
+
+async function requireAdmin(request: Request) {
+  const { user, supabase } = await requireUser(request);
+  const email = (user.email ?? '').toLowerCase();
+  const { data } = await supabase.from('comp_accounts').select('note').eq('email', email).maybeSingle();
+  if (!email || data?.note !== 'admin') throw new ForbiddenError('Admins only.');
+  return { user, supabase, email };
+}
+
+function errorStatus(error: unknown) {
+  return error instanceof AuthError ? 401 : error instanceof ForbiddenError ? 403 : 400;
+}
+
+export async function GET(request: Request): Promise<Response> {
+  try {
+    const { supabase } = await requireAdmin(request);
+    const [overview, wrap, grants, features, insights] = await Promise.all([
+      supabase.rpc('admin_overview'),
+      supabase.rpc('admin_wrap', { p_weeks: 8 }),
+      supabase.from('admin_grants').select('target_email, plan, days, granted_by, note, created_at').order('created_at', { ascending: false }).limit(10),
+      supabase.rpc('admin_feature_usage'),
+      supabase.rpc('admin_insight_progress', { p_min: 30 }),
+    ]);
+    if (overview.error || wrap.error) {
+      throw new Error('Admin data could not be loaded. Check that migrations 006 to 008 have been run.');
+    }
+    return json({ overview: overview.data, wrap: wrap.data ?? [], grants: grants.data ?? [], features: features.error ? null : features.data, insights: insights.error ? null : insights.data });
+  } catch (error) {
+    return fail(safeMessage(error), errorStatus(error));
+  }
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
-    const { user, supabase } = await requireUser(request);
-    const body = await readJson<{ runId?: unknown; historyId?: unknown; worked?: unknown; note?: unknown }>(request);
+    const { supabase, email } = await requireAdmin(request);
+    const body = await readJson<{ email?: unknown; plan?: unknown; days?: unknown; note?: unknown }>(request);
+    const target = assertText(body.email, 'Email', 254);
+    const plan = assertText(body.plan, 'Plan', 20);
+    const note = assertText(body.note, 'Note', 200, false);
+    const days = Number(body.days);
+    if (!Number.isInteger(days)) throw new Error('Days must be a whole number.');
 
-    if (typeof body.worked !== 'boolean') throw new Error('A yes or no answer is required.');
-    const runId = assertText(body.runId, 'Run reference', 60, false);
-    const historyId = assertText(body.historyId, 'History reference', 60, false);
-    const note = assertText(body.note, 'Note', 600, false);
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('business_category, stage')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const { error } = await supabase.from('outcomes').upsert(
-      {
-        user_id: user.id,
-        run_id: runId || null,
-        history_id: historyId || null,
-        worked: body.worked,
-        note: note || null,
-        business_category: profile?.business_category ?? null,
-        stage: profile?.stage ?? null,
-      },
-      { onConflict: 'user_id,run_id' },
-    );
-    if (error) throw new Error('Your feedback could not be saved.');
-
-    return json({ recorded: true });
+    const { data, error } = await supabase.rpc('admin_grant_plan', {
+      p_email: target,
+      p_plan: plan,
+      p_days: days,
+      p_granted_by: email,
+      p_note: note,
+    });
+    if (error) throw new Error(error.message);
+    return json(data);
   } catch (error) {
-    return fail(safeMessage(error), error instanceof AuthError ? 401 : 400);
+    return fail(safeMessage(error), errorStatus(error));
   }
 }

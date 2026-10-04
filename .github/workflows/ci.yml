@@ -13,8 +13,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+      # No lockfile is committed (it was removed in July), so `npm ci` and the
+      # npm cache cannot run. Install the same way Vercel does.
+      - run: npm install --no-audit --no-fund
       - run: npm run typecheck
+      # api/ functions inline shared helpers (Vercel bundles each one alone),
+      # so unused-helper warnings are expected there; real type errors are not.
+      - run: npx tsc -p tsconfig.api.json --noUnusedLocals false --noUnusedParameters false
       - run: npm test
       - run: npm run build

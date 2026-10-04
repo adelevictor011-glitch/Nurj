@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import {
   ArrowLeft,
   ArrowRight,
   BadgeCheck,
   BarChart3,
   BookOpen,
+  Bookmark,
+  Calculator,
   BrainCircuit,
   CalendarRange,
   Check,
@@ -33,16 +35,28 @@ import {
   Target,
   TrendingUp,
   WandSparkles,
+  WifiOff,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { GOALS, GUIDES, QUIZ, STAGES } from './data';
 import { GUIDE_CONTENT } from './guides-content';
-import { api } from './lib/api';
+import { api, type RefundStatus, type SectorInsights } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { SavedSnippets } from './components/SavedSnippets';
+import { AdminConsole } from './components/AdminConsole';
+import { SectorInsightsCard, goalWinRate } from './components/SectorInsights';
+import { useUsageConfirm } from './components/UsageConfirm';
+import { SaveToLibrary } from './components/SaveToLibrary';
+import { ChannelPanel } from './components/ChannelPanel';
+import { Library } from './components/Library';
+import { Calculators } from './components/Calculators';
+import { WinLog, RoiLine } from './components/WinLog';
+import { Businesses } from './components/Businesses';
+import { ConsentCheckbox, ConsentGate, LegalLinks, LegalPage } from './components/Legal';
+import { LEGAL_VERSION, legalFromPath } from './legal';
 import type {
   EnhanceResult,
   GenerateResult,
@@ -75,6 +89,8 @@ const NAV_ITEMS: Array<{ screen: ScreenKey; label: string; icon: LucideIcon }> =
   { screen: 'home', label: 'Command', icon: Home },
   { screen: 'generate', label: 'Studio', icon: WandSparkles },
   { screen: 'enhance', label: 'Enhance', icon: BrainCircuit },
+  { screen: 'library', label: 'Library', icon: Bookmark },
+  { screen: 'tools', label: 'Calculators', icon: Calculator },
   { screen: 'guides', label: 'Playbooks', icon: BookOpen },
   { screen: 'history', label: 'History', icon: History },
 ];
@@ -112,9 +128,16 @@ function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [sidebarCompact, setSidebarCompact] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [paymentBusy, setPaymentBusy] = useState<PlanKey | null>(null);
+  const [paymentBusy, setPaymentBusy] = useState<PlanKey | 'business_addon' | null>(null);
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  const [dataSaver, setDataSaver] = useState(() => loadLocal<boolean>('nurj-data-saver', false));
   const [pendingReference, setPendingReference] = useState<string | null>(null);
   const [verifyState, setVerifyState] = useState<'idle' | 'verifying' | 'failed'>('idle');
+  const [synced, setSynced] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [insights, setInsights] = useState<SectorInsights | null>(null);
+  const [consented, setConsented] = useState(() => loadLocal<string>('nurj-consent', '') === LEGAL_VERSION);
+  const legalKey = legalFromPath(window.location.pathname);
 
   const inApp = !['landing', 'quiz', 'result', 'upgrade'].includes(screen);
 
@@ -145,6 +168,8 @@ function App() {
       };
 
       setProfile(merged);
+      setIsAdmin(Boolean(status.admin));
+      setInsights(status.insights ?? null);
       setUsage(status.usage);
       setHistory(status.history);
       localStorage.setItem('nurj-profile-v2', JSON.stringify(merged));
@@ -178,6 +203,18 @@ function App() {
         setScreen(intent ?? (merged.onboarding_complete ? 'home' : 'quiz'));
       }
       initialSyncDone.current = true;
+
+      // The landing-page tick is the user's agreement; record it on the
+      // account the first time they sign in. Otherwise ConsentGate asks.
+      if (merged.terms_version !== LEGAL_VERSION && loadLocal<string>('nurj-consent', '') === LEGAL_VERSION) {
+        try {
+          const accepted = await api.acceptTerms(LEGAL_VERSION);
+          setProfile((current) => ({ ...current, ...accepted }));
+        } catch (consentError) {
+          console.error('[nurj] could not record consent', consentError);
+        }
+      }
+      setSynced(true);
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Could not load your workspace.');
     }
@@ -211,6 +248,22 @@ function App() {
     localStorage.setItem('nurj-guest-v2', JSON.stringify(guestMode));
   }, [guestMode]);
 
+  // Roadmap feature 18: offline awareness and a low-data mode.
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('nurj-data-saver', JSON.stringify(dataSaver));
+    document.body.classList.toggle('data-saver', dataSaver);
+  }, [dataSaver]);
+
   // Re-sync when the user comes back to the tab. Plan changes activated by the
   // Paystack webhook now show up without a manual reload.
   useEffect(() => {
@@ -241,7 +294,9 @@ function App() {
           localStorage.removeItem('nurj-pending-reference');
           setPendingReference(null);
           setVerifyState('idle');
-          notify(`${result.plan === 'builder' ? 'Builder' : 'Operator'} is now active.`);
+          notify(result.needs_refund
+            ? result.reason ?? 'That payment could not be applied, so we will refund it within 2 working days.'
+            : result.plan === 'business_addon' ? 'Your extra business slot is now active.' : `${result.plan === 'builder' ? 'Builder' : 'Operator'} is now active.`);
           await syncStatus({ redirect: false });
           return;
         } catch {
@@ -327,7 +382,7 @@ function App() {
     setScreen('result');
   }
 
-  async function beginPayment(plan: 'builder' | 'operator') {
+  async function beginPayment(plan: 'builder' | 'operator' | 'business_addon') {
     if (!user) {
       // Remember why they were signing in, so OAuth returns them to checkout
       // instead of dumping them on the dashboard with the intent lost.
@@ -347,13 +402,27 @@ function App() {
     }
   }
 
+  if (legalKey) {
+    return <LegalPage docKey={legalKey} />;
+  }
+
   if (!authReady) {
     return <LoadingScreen />;
   }
 
+  function giveConsent(value: boolean) {
+    setConsented(value);
+    if (value) localStorage.setItem('nurj-consent', JSON.stringify(LEGAL_VERSION));
+    else localStorage.removeItem('nurj-consent');
+  }
+
+  const needsConsent = Boolean(user) && synced && profile.terms_version !== LEGAL_VERSION;
+
   return (
+    <MotionConfig reducedMotion={dataSaver ? 'always' : 'user'}>
     <div className="app-root">
-      <Ambient />
+      {!dataSaver && <Ambient />}
+      {!online && <div className="offline-banner" role="status"><WifiOff size={15} /> You are offline. Saved prompts, playbooks and calculators still work. Connect to generate.</div>}
       {pendingReference && verifyState !== 'idle' && (
         <PaymentBanner
           state={verifyState}
@@ -368,7 +437,7 @@ function App() {
       <AnimatePresence mode="wait">
         {screen === 'landing' && (
           <Page key="landing">
-            <Landing onSignIn={signIn} onGuest={startGuest} configured={isSupabaseConfigured} />
+            <Landing onSignIn={signIn} onGuest={startGuest} configured={isSupabaseConfigured} consented={consented} onConsent={giveConsent} />
           </Page>
         )}
         {screen === 'quiz' && (
@@ -385,7 +454,8 @@ function App() {
           <Page key="upgrade">
             <Upgrade
               currentPlan={profile.plan}
-              busy={paymentBusy}
+              busy={paymentBusy === 'business_addon' ? null : paymentBusy}
+              userId={user?.id ?? null}
               onBack={() => setScreen('home')}
               onChoose={beginPayment}
             />
@@ -403,6 +473,7 @@ function App() {
               mobileMenu={mobileMenu}
               setMobileMenu={setMobileMenu}
               onSignOut={signOut}
+              isAdmin={isAdmin}
             >
               {screen === 'home' && (
                 <Dashboard
@@ -412,6 +483,8 @@ function App() {
                   userId={user?.id ?? null}
                   onNavigate={setScreen}
                   onProfile={setProfile}
+                  notify={notify}
+                  insights={insights}
                 />
               )}
               {screen === 'generate' && (
@@ -426,6 +499,7 @@ function App() {
                   onUpgrade={() => setScreen('upgrade')}
                   onSignIn={signIn}
                   notify={notify}
+                  insights={insights}
                 />
               )}
               {screen === 'enhance' && (
@@ -433,6 +507,7 @@ function App() {
                   profile={profile}
                   usage={usage}
                   authenticated={Boolean(user)}
+                  userId={user?.id ?? null}
                   onUsage={setUsage}
                   onUpgrade={() => setScreen('upgrade')}
                   notify={notify}
@@ -440,10 +515,25 @@ function App() {
               )}
               {screen === 'guides' && <Guides stageKey={profile.stage ?? 'launch'} plan={profile.plan} onUpgrade={() => setScreen('upgrade')} />}
               {screen === 'history' && <HistoryScreen history={history} notify={notify} />}
+              {screen === 'admin' && isAdmin && <AdminConsole notify={notify} />}
+              {screen === 'library' && (
+                <LibraryScreen profile={profile} usage={usage} userId={user?.id ?? null} notify={notify} onUpgrade={() => setScreen('upgrade')}
+                  onUsage={(remaining) => setUsage((current) => ({ ...current, prompt: { ...current.prompt, used: current.prompt.used + 1, remaining } }))} />
+              )}
+              {screen === 'tools' && (
+                <ToolsScreen profile={profile} usage={usage} authenticated={Boolean(user)} notify={notify}
+                  onUsage={(remaining) => setUsage((current) => ({ ...current, prompt: { ...current.prompt, used: current.prompt.used + 1, remaining } }))} />
+              )}
               {screen === 'account' && (
                 <Account
                   profile={profile}
                   user={user}
+                  onDeleted={signOut}
+                  onBuySlot={() => void beginPayment('business_addon')}
+                  buyingSlot={paymentBusy === 'business_addon'}
+                  onSwitched={() => void syncStatus({ redirect: false })}
+                  dataSaver={dataSaver}
+                  onDataSaver={setDataSaver}
                   onProfile={setProfile}
                   onUpgrade={() => setScreen('upgrade')}
                   notify={notify}
@@ -453,8 +543,23 @@ function App() {
           </Page>
         )}
       </AnimatePresence>
+      {needsConsent && (
+        <ConsentGate
+          onSignOut={signOut}
+          onAccept={async () => {
+            try {
+              const accepted = await api.acceptTerms(LEGAL_VERSION);
+              giveConsent(true);
+              setProfile((current) => ({ ...current, ...accepted }));
+            } catch (error) {
+              notify(error instanceof Error ? error.message : 'Your agreement could not be saved.');
+            }
+          }}
+        />
+      )}
       <AnimatePresence>{toast && <Toast message={toast} />}</AnimatePresence>
     </div>
+    </MotionConfig>
   );
 }
 
@@ -501,18 +606,31 @@ function Landing({
   onSignIn,
   onGuest,
   configured,
+  consented,
+  onConsent,
 }: {
   onSignIn: () => void;
   onGuest: () => void;
   configured: boolean;
+  consented: boolean;
+  onConsent: (value: boolean) => void;
 }) {
+  const [nudge, setNudge] = useState(false);
+  const guard = (action: () => void) => () => {
+    if (!consented) {
+      setNudge(true);
+      return;
+    }
+    action();
+  };
+
   return (
     <main className="landing-shell">
       <nav className="landing-nav">
         <Brand />
         <div className="landing-nav-actions">
           <span className="system-status"><i /> Systems ready</span>
-          <button className="button button-ghost button-small" onClick={onSignIn}>Sign in</button>
+          <button className="button button-ghost button-small" onClick={guard(onSignIn)}>Sign in</button>
         </div>
       </nav>
 
@@ -524,13 +642,15 @@ function Landing({
             Nurj reads where your side hustle is, identifies the constraint, and turns your next move into precise AI execution.
           </p>
           <div className="hero-actions">
-            <button className="button button-primary" onClick={onGuest}>
+            <button className="button button-primary" onClick={guard(onGuest)}>
               Run my signal scan <ArrowRight size={17} />
             </button>
-            <button className="button button-secondary" onClick={onSignIn}>
+            <button className="button button-secondary" onClick={guard(onSignIn)}>
               Continue with Google
             </button>
           </div>
+          <ConsentCheckbox checked={consented} onChange={(value) => { onConsent(value); if (value) setNudge(false); }} />
+          {nudge && !consented && <p className="consent-nudge" role="alert">Tick the box to agree to the Terms and Privacy Policy first.</p>}
           <p className="hero-microcopy">
             <ShieldCheck size={14} /> Five questions. One clear move. No credit card.
             {!configured && <span className="demo-note"> Demo mode is active until Supabase is configured.</span>}
@@ -596,6 +716,7 @@ function Landing({
         <p>Less AI theatre. More commercial movement.</p>
         <div className="future-line" />
       </section>
+      <LegalLinks />
     </main>
   );
 }
@@ -728,6 +849,7 @@ function WorkspaceShell({
   mobileMenu,
   setMobileMenu,
   onSignOut,
+  isAdmin = false,
 }: {
   children: React.ReactNode;
   screen: ScreenKey;
@@ -739,6 +861,7 @@ function WorkspaceShell({
   mobileMenu: boolean;
   setMobileMenu: (open: boolean) => void;
   onSignOut: () => void;
+  isAdmin?: boolean;
 }) {
   return (
     <div className={`workspace ${compact ? 'sidebar-compact' : ''}`}>
@@ -761,6 +884,7 @@ function WorkspaceShell({
           {!compact && <div><small>CURRENT STAGE</small><strong>{STAGES[profile.stage ?? 'launch'].label}</strong></div>}
         </div>
         <div className="sidebar-bottom">
+          {isAdmin && <button className={screen === 'admin' ? 'active' : ''} onClick={() => { setScreen('admin'); setMobileMenu(false); }}><BarChart3 size={19} /><span>Admin</span></button>}
           <button onClick={() => { setScreen('account'); setMobileMenu(false); }}><CircleUserRound size={19} /><span>{user ? 'Account' : 'Guest profile'}</span></button>
           <button onClick={onSignOut}><LogOut size={19} /><span>{user ? 'Sign out' : 'Exit guest'}</span></button>
         </div>
@@ -770,7 +894,7 @@ function WorkspaceShell({
         <header className="app-header">
           <button className="mobile-menu-button" onClick={() => setMobileMenu(true)}><Menu size={20} /></button>
           <div className="app-header-context">
-            <span>{NAV_ITEMS.find((item) => item.screen === screen)?.label ?? 'Account'}</span>
+            <span>{NAV_ITEMS.find((item) => item.screen === screen)?.label ?? (screen === 'admin' ? 'Admin' : 'Account')}</span>
             <i />
             <small>{profile.plan === 'free' ? 'Free workspace' : `${profile.plan} active`}</small>
           </div>
@@ -798,6 +922,8 @@ function Dashboard({
   userId,
   onNavigate,
   onProfile,
+  notify,
+  insights,
 }: {
   profile: UserProfile;
   usage: UsageStatus;
@@ -805,6 +931,8 @@ function Dashboard({
   userId: string | null;
   onNavigate: (screen: ScreenKey) => void;
   onProfile: (profile: UserProfile) => void;
+  notify: (message: string) => void;
+  insights?: SectorInsights | null;
 }) {
   const stage = STAGES[profile.stage ?? 'launch'];
   const [completed, setCompleted] = useState<number[]>(() => loadLocal('nurj-actions-v2', []));
@@ -920,6 +1048,9 @@ function Dashboard({
           )}
         </article>
       </section>
+
+      <SectorInsightsCard insights={insights} onUseGoal={() => onNavigate('generate')} />
+      <WinLog userId={userId} businessId={profile.active_business_id} plan={profile.plan} notify={notify} />
     </div>
   );
 }
@@ -939,10 +1070,12 @@ function PromptStudio({
   onUpgrade,
   onSignIn,
   notify,
+  insights,
 }: {
   profile: UserProfile;
   usage: UsageStatus;
   authenticated: boolean;
+  insights?: SectorInsights | null;
   userId: string | null;
   onUsage: (usage: UsageStatus) => void;
   onHistory: (item: PromptHistoryItem) => void;
@@ -962,6 +1095,7 @@ function PromptStudio({
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [wall, setWall] = useState<'none' | 'quota' | 'guest'>('none');
   const [historyId, setHistoryId] = useState<string | null>(null);
+  const { ask, modal } = useUsageConfirm(usage, profile.plan, notify);
 
   const selectedGoal = GOALS.find((goal) => goal.id === goalId);
   const goal = goalId === 'custom' ? customGoal : selectedGoal?.label ?? '';
@@ -1082,6 +1216,7 @@ function PromptStudio({
 
   return (
     <div className="screen-stack studio-screen">
+      {modal}
       <section className="screen-heading">
         <div><span className="eyebrow">PROMPT STUDIO</span><h1>Turn context into execution.</h1><p>Nurj architects the instruction. Your AI produces the work.</p></div>
         <UsagePill used={usage.prompt.used} limit={usage.prompt.limit} label="prompts today" />
@@ -1106,9 +1241,12 @@ function PromptStudio({
               <div className="goal-grid">
                 {GOALS.map((goalItem) => {
                   const Icon = ICONS[goalItem.icon] ?? Sparkles;
+                  const rate = goalWinRate(insights, goalItem.label);
                   return (
                     <button className={goalId === goalItem.id ? 'selected' : ''} onClick={() => setGoalId(goalItem.id)} key={goalItem.id}>
-                      <span><Icon size={19} /></span><strong>{goalItem.label}</strong><p>{goalItem.description}</p><i><Check size={12} /></i>
+                      <span><Icon size={19} /></span><strong>{goalItem.label}</strong><p>{goalItem.description}</p>
+                      {rate && <small className="goal-rate">{rate.worked_pct}% in your sector said it worked ({rate.reports})</small>}
+                      <i><Check size={12} /></i>
                     </button>
                   );
                 })}
@@ -1167,8 +1305,8 @@ function PromptStudio({
                 <>
                   <div className="prompt-output-box"><div className="output-toolbar"><span><Sparkles size={14} /> NURJ PROMPT</span><CopyButton text={result.prompt} notify={notify} /></div><pre>{result.prompt}</pre></div>
                   <div className="output-insight-grid"><div><span>WHY IT WORKS</span><p>{result.why_it_works}</p></div><div><span>NEXT ACTION</span><p>{result.next_action}</p></div></div>
-                  {authenticated && <RunPanel prompt={result.prompt} historyId={historyId} notify={notify} onUsage={(remaining) => onUsage({ ...usage, prompt: { ...usage.prompt, used: usage.prompt.used + 1, remaining } })} />}
-                  <div className="canvas-footer"><button className="button button-ghost" onClick={reset}>Build another</button><ShareButton text={result.prompt} title={result.title} /><CopyButton text={result.prompt} notify={notify} primary /></div>
+                  {authenticated && <RunPanel prompt={result.prompt} historyId={historyId} userId={userId} businessId={profile.active_business_id} ask={ask} notify={notify} onUsage={(remaining) => onUsage({ ...usage, prompt: { ...usage.prompt, used: usage.prompt.used + 1, remaining } })} />}
+                  <div className="canvas-footer"><button className="button button-ghost" onClick={reset}>Build another</button><SaveToLibrary prompt={result.prompt} defaultTitle={result.title} source="generated" userId={userId} businessId={profile.active_business_id} notify={notify} /><ShareButton text={result.prompt} title={result.title} /><CopyButton text={result.prompt} notify={notify} primary /></div>
                 </>
               )}
             </div>
@@ -1183,6 +1321,7 @@ function Enhancer({
   profile,
   usage,
   authenticated,
+  userId,
   onUsage,
   onUpgrade,
   notify,
@@ -1190,6 +1329,7 @@ function Enhancer({
   profile: UserProfile;
   usage: UsageStatus;
   authenticated: boolean;
+  userId: string | null;
   onUsage: (usage: UsageStatus) => void;
   onUpgrade: () => void;
   notify: (message: string) => void;
@@ -1256,6 +1396,7 @@ function Enhancer({
               <pre>{result.enhanced_prompt}</pre>
               <div className="diagnosis"><span>DIAGNOSIS</span><p>{result.diagnosis}</p></div>
               <div className="change-list">{result.changes.map((change) => <span key={change}><Check size={13} /> {change}</span>)}</div>
+              <div className="canvas-footer"><span /><SaveToLibrary prompt={result.enhanced_prompt} defaultTitle={result.title} source="enhanced" userId={userId} businessId={profile.active_business_id} notify={notify} /></div>
             </>
           ) : <div className="empty-state"><BrainCircuit size={30} /><strong>Clarity begins with contrast.</strong><p>Nurj will show the rebuilt prompt, the diagnosis and every meaningful change.</p></div>}
         </article>
@@ -1277,7 +1418,7 @@ function Guides({ stageKey, plan, onUpgrade }: { stageKey: StageKey; plan: PlanK
         <div className="guide-sections">
           {GUIDES[activeStage].map((section, index) => (
             <article className={`guide-section panel ${open === index ? 'open' : ''}`} key={section.title}>
-              <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks</small></div><ChevronDown size={18} /></button>
+              <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks · {section.items.filter((item) => item.free).length} free</small></div><ChevronDown size={18} /></button>
               <AnimatePresence initial={false}>{open === index && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="guide-items">{section.items.map((item) => { const locked = !item.free && plan === 'free'; return <button className={locked ? 'locked' : ''} key={item.title} onClick={() => (locked ? onUpgrade() : setReading(item))}><span className="guide-play"><BookOpen size={15} /></span><div><strong>{item.title}</strong><p>{item.description}</p><small>{item.minutes} min read · {locked ? 'Builder' : 'Available'}</small></div><ArrowRight size={15} /></button>; })}</motion.div>}</AnimatePresence>
             </article>
           ))}
@@ -1357,12 +1498,24 @@ function HistoryScreen({ history, notify }: { history: PromptHistoryItem[]; noti
 function Account({
   profile,
   user,
+  onDeleted,
+  onBuySlot,
+  buyingSlot,
+  onSwitched,
+  dataSaver,
+  onDataSaver,
   onProfile,
   onUpgrade,
   notify,
 }: {
   profile: UserProfile;
   user: User | null;
+  onDeleted: () => void;
+  onBuySlot: () => void;
+  buyingSlot: boolean;
+  onSwitched: () => void;
+  dataSaver: boolean;
+  onDataSaver: (value: boolean) => void;
   onProfile: (profile: UserProfile) => void;
   onUpgrade: () => void;
   notify: (message: string) => void;
@@ -1373,6 +1526,69 @@ function Account({
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [refund, setRefund] = useState<RefundStatus | null>(null);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [dataBusy, setDataBusy] = useState<'export' | 'delete' | 'refund' | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    api.account()
+      .then(({ refund: status }) => { if (!cancelled) setRefund(status); })
+      .catch(() => { /* the panel simply stays hidden */ });
+    return () => { cancelled = true; };
+  }, [user, profile.plan_expires_at]);
+
+  async function downloadData() {
+    setDataBusy('export');
+    try {
+      const blob = await api.exportData();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `nurj-data-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Your data could not be exported.');
+    } finally {
+      setDataBusy(null);
+    }
+  }
+
+  async function deleteAccount() {
+    if (deleteText !== 'DELETE') return;
+    setDataBusy('delete');
+    try {
+      await api.deleteAccount();
+      localStorage.removeItem('nurj-profile-v2');
+      localStorage.removeItem('nurj-snippets-v1');
+      notify('Your account and data have been deleted.');
+      onDeleted();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Your account could not be deleted.');
+      setDataBusy(null);
+    }
+  }
+
+  async function requestRefund() {
+    setDataBusy('refund');
+    try {
+      const result = await api.requestRefund(refundReason.trim());
+      notify(result.message);
+      setRefundOpen(false);
+      setRefund({ eligible: false, reason: result.message });
+      // The server already adjusted the plan; refresh to show what is left.
+      window.dispatchEvent(new Event('focus'));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Your refund could not be requested.');
+    } finally {
+      setDataBusy(null);
+    }
+  }
 
   const dirty =
     name.trim() !== (profile.display_name ?? '').trim() ||
@@ -1457,11 +1673,72 @@ function Account({
           )}
         </form>
         <div className="account-side">
-          <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
+          <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><RoiLine userId={user?.id ?? null} plan={profile.plan === 'free' ? 'builder' : profile.plan} /><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
+          <Businesses profile={profile} userId={user?.id ?? null} notify={notify} onSwitched={onSwitched} onBuySlot={onBuySlot} buying={buyingSlot} />
+          <article className="panel data-card">
+            <span className="eyebrow">PREFERENCES</span>
+            {user && (
+              <label className="consent-check">
+                <input type="checkbox" checked={!profile.digest_opt_out} onChange={async (event) => {
+                  const optOut = !event.target.checked;
+                  onProfile({ ...profile, digest_opt_out: optOut });
+                  if (supabase) {
+                    const { error } = await supabase.from('profiles').update({ digest_opt_out: optOut }).eq('id', user.id);
+                    if (error) notify('Your email preference could not be saved.');
+                  }
+                }} />
+                <span>Send me the Monday momentum email: last week's wins and this week's one move.</span>
+              </label>
+            )}
+            <label className="consent-check">
+              <input type="checkbox" checked={dataSaver} onChange={(event) => onDataSaver(event.target.checked)} />
+              <span>Data saver: turn off animations and background effects on this device.</span>
+            </label>
+          </article>
+          {refund?.eligible && (
+            <article className="panel data-card">
+              <span className="eyebrow">7-DAY GUARANTEE</span>
+              <h3>Not working for you?</h3>
+              <p>You can get a full refund of ₦{(refund.amount / 100).toLocaleString('en-NG')} until {new Date(refund.deadline).toLocaleDateString('en-NG', { day: 'numeric', month: 'long' })}. Once per account. <a href="/refunds" target="_blank" rel="noopener">Refund policy</a></p>
+              {refundOpen ? (
+                <>
+                  <textarea className="field" value={refundReason} maxLength={500} onChange={(event) => setRefundReason(event.target.value)} placeholder="Optional: what didn't work? It helps us improve." />
+                  <div className="account-actions">
+                    <button className="button button-primary button-small" disabled={dataBusy === 'refund'} onClick={() => void requestRefund()}>{dataBusy === 'refund' ? 'Requesting…' : 'Confirm refund'}</button>
+                    <button className="button button-ghost button-small" onClick={() => setRefundOpen(false)}>Cancel</button>
+                  </div>
+                </>
+              ) : (
+                <button className="button button-secondary button-small" onClick={() => setRefundOpen(true)}>Request refund</button>
+              )}
+            </article>
+          )}
+          {user && (
+            <article className="panel data-card">
+              <span className="eyebrow">YOUR DATA</span>
+              <h3>Download or delete</h3>
+              <p>Get a copy of everything Nurj holds about you, or delete your account and data for good. Payment records are kept without your name for tax.</p>
+              <div className="account-actions">
+                <button className="button button-secondary button-small" disabled={dataBusy === 'export'} onClick={() => void downloadData()}>{dataBusy === 'export' ? 'Preparing…' : 'Download my data'}</button>
+                {!deleteOpen && <button className="button button-ghost button-small" onClick={() => setDeleteOpen(true)}>Delete account</button>}
+              </div>
+              {deleteOpen && (
+                <div className="account-confirm" role="alert">
+                  <strong>This permanently deletes your account, prompts, history and saved items. It cannot be undone. Any paid time left is lost.</strong>
+                  <label><span>Type DELETE to confirm</span><input className="field" value={deleteText} autoComplete="off" onChange={(event) => setDeleteText(event.target.value)} /></label>
+                  <div>
+                    <button className="button button-primary button-small" disabled={deleteText !== 'DELETE' || dataBusy === 'delete'} onClick={() => void deleteAccount()}>{dataBusy === 'delete' ? 'Deleting…' : 'Delete everything'}</button>
+                    <button className="button button-ghost button-small" onClick={() => { setDeleteOpen(false); setDeleteText(''); }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </article>
+          )}
           <article className="panel security-card"><ShieldCheck size={21} /><div><strong>Secure by design</strong><p>Secret AI and payment keys remain inside Vercel Functions. Paid-plan fields cannot be edited from the browser.</p></div></article>
           <article className="panel account-identity"><div className="account-avatar">{(name || 'N')[0].toUpperCase()}</div><div><strong>{name || 'Nurj builder'}</strong><span>{user?.email ?? 'Guest workspace'}</span></div><BadgeCheck size={18} /></article>
         </div>
       </section>
+      <LegalLinks />
     </div>
   );
 }
@@ -1469,11 +1746,13 @@ function Account({
 function Upgrade({
   currentPlan,
   busy,
+  userId,
   onBack,
   onChoose,
 }: {
   currentPlan: PlanKey;
   busy: PlanKey | null;
+  userId: string | null;
   onBack: () => void;
   onChoose: (plan: 'builder' | 'operator') => void;
 }) {
@@ -1483,19 +1762,11 @@ function Upgrade({
       <section className="upgrade-heading"><span className="eyebrow">NURJ ACCESS</span><h1>More movement. Less friction.</h1><p>Choose the level that matches how often Nurj needs to work alongside the business.</p></section>
       <section className="pricing-grid">
         <PlanCard name="Free" price="₦0" description="Test the operating system and build a daily execution habit." features={['5 prompt architectures daily', '3 prompt enhancements daily', 'Free stage playbooks', 'Local guest exploration']} active={currentPlan === 'free'} />
-        <PlanCard name="Builder" price="₦10,000" suffix="30 days" description="For a founder actively building pipeline, offers and content." features={['Unlimited prompt architectures', 'Unlimited prompt enhancements', 'Saved intelligence history', 'Sector-aware business context']} featured active={currentPlan === 'builder'} busy={busy === 'builder'} onChoose={() => onChoose('builder')} />
-        {/*
-          Operator is deliberately not sold here.
-          Every bullet it advertised resolved to the same code path as Builder:
-          consume_daily_quota treats any non-free plan identically and Guides
-          gates only on plan === 'free'. Selling a ₦25,000 tier that is
-          byte-for-byte Builder is the fastest way to lose the audience you are
-          building in front of. The plan remains supported end-to-end so
-          existing Operator customers keep their access — it goes back on this
-          page the day it does something Builder does not.
-        */}
+        <PlanCard name="Builder" price="₦10,000" suffix="30 days" description="For a founder actively building pipeline, offers and content." features={['Unlimited prompt architectures and enhancements*', '10 prompt runs a day', '200 saved prompts', '1 business (add more for ₦5,000 each)']} featured active={currentPlan === 'builder'} busy={busy === 'builder'} onChoose={() => onChoose('builder')} />
+        <PlanCard name="Operator" price="₦25,000" suffix="30 days" description="For founders running more than one hustle, or running Nurj all day." features={['Everything in Builder', 'Unlimited prompt runs*', 'A monthly prompt pack for your sector', 'Unlimited saved prompts', 'Up to 3 businesses (add 2 more for ₦5,000 each)']} active={currentPlan === 'operator'} busy={busy === 'operator'} onChoose={() => onChoose('operator')} />
       </section>
-      <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Each successful purchase grants 30 days of access; it is not presented as automatic renewal.</p>
+      <RoiLine userId={userId} plan="builder" />
+      <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Each payment gives 30 days of access and does not renew automatically. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>
     </main>
   );
 }
@@ -1539,42 +1810,75 @@ function IntelligenceLoader() {
 function RunPanel({
   prompt,
   historyId,
+  userId,
+  businessId,
+  ask,
   notify,
   onUsage,
 }: {
   prompt: string;
   historyId: string | null;
+  userId: string | null;
+  businessId?: string | null;
+  ask: (label: string, action: () => void) => void;
   notify: (message: string) => void;
   onUsage: (remaining: number | null) => void;
 }) {
+  const [activePrompt, setActivePrompt] = useState(prompt);
   const [output, setOutput] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [answered, setAnswered] = useState(false);
+  const [answered, setAnswered] = useState<'yes' | 'no' | null>(null);
+  const [complaint, setComplaint] = useState('');
+  const [fixing, setFixing] = useState(false);
+  const [fixed, setFixed] = useState<EnhanceResult | null>(null);
 
-  async function run() {
-    setBusy(true);
-    try {
-      const result = await api.execute(prompt, historyId);
-      setOutput(result.output);
-      setRunId(result.run_id);
-      setAnswered(false);
-      onUsage(result.remaining);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Nurj could not run this prompt.');
-    } finally {
-      setBusy(false);
-    }
+  useEffect(() => { setActivePrompt(prompt); setOutput(null); setFixed(null); setAnswered(null); }, [prompt]);
+
+  function run(text = activePrompt) {
+    ask('Run this prompt', async () => {
+      setBusy(true);
+      try {
+        const result = await api.execute(text, historyId);
+        setOutput(result.output);
+        setRunId(result.run_id);
+        setAnswered(null);
+        setFixed(null);
+        setComplaint('');
+        onUsage(result.remaining);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Nurj could not run this prompt.');
+      } finally {
+        setBusy(false);
+      }
+    });
   }
 
   async function answer(worked: boolean) {
-    setAnswered(true);
+    setAnswered(worked ? 'yes' : 'no');
     try {
       await api.recordOutcome({ runId, historyId, worked });
-      notify(worked ? 'Noted — that is the signal that matters.' : 'Noted. That tells us more than a good result does.');
+      if (worked) notify('Noted. Log the win on your Command page when the money lands.');
     } catch {
       // Never block the user on feedback bookkeeping.
     }
+  }
+
+  // Roadmap feature 9: "It didn't work, fix it".
+  function fix() {
+    if (!complaint.trim()) return;
+    ask('Fix this prompt', async () => {
+      setFixing(true);
+      try {
+        const result = await api.refine({ prompt: activePrompt, output: output ?? '', complaint: complaint.trim() });
+        setFixed(result);
+        onUsage(result.remaining);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Nurj could not fix this prompt.');
+      } finally {
+        setFixing(false);
+      }
+    });
   }
 
   if (!output) {
@@ -1584,7 +1888,7 @@ function RunPanel({
           <strong>Run it here instead of pasting it elsewhere.</strong>
           <p>Nurj executes the prompt and keeps the result with your history.</p>
         </div>
-        <button className="button button-secondary button-small" disabled={busy} onClick={run}>
+        <button className="button button-secondary button-small" disabled={busy} onClick={() => run()}>
           {busy ? 'Running…' : 'Run this prompt'} <Rocket size={15} />
         </button>
       </div>
@@ -1595,14 +1899,34 @@ function RunPanel({
     <div className="run-output">
       <div className="output-toolbar"><span><Rocket size={14} /> RESULT</span><CopyButton text={output} notify={notify} /></div>
       <pre>{output}</pre>
-      {!answered ? (
+      <ChannelPanel text={output} title="Nurj result" authenticated={Boolean(userId)} ask={ask} onRemaining={onUsage} notify={notify} />
+      {answered === null && (
         <div className="outcome-ask">
           <span>Did this actually work?</span>
           <button className="button button-small button-secondary" onClick={() => void answer(true)}>Yes, I used it</button>
-          <button className="button button-small button-ghost" onClick={() => void answer(false)}>Not quite</button>
+          <button className="button button-small button-ghost" onClick={() => void answer(false)}>It didn't work</button>
         </div>
-      ) : (
-        <div className="outcome-ask done"><Check size={14} /> Thanks — this is what makes the next prompt sharper.</div>
+      )}
+      {answered === 'yes' && <div className="outcome-ask done"><Check size={14} /> Thanks — this is what makes the next prompt sharper.</div>}
+      {answered === 'no' && !fixed && (
+        <div className="fix-panel">
+          <label><span>What went wrong? One line is enough.</span>
+            <textarea className="field" value={complaint} maxLength={500} onChange={(event) => setComplaint(event.target.value)} placeholder="Too generic, wrong tone, too long, wrong audience…" />
+          </label>
+          <button className="button button-primary button-small" disabled={!complaint.trim() || fixing} onClick={fix}>{fixing ? 'Fixing…' : 'Fix it'} <Sparkles size={14} /></button>
+        </div>
+      )}
+      {fixed && (
+        <div className="fix-result">
+          <div className="output-toolbar"><span><Sparkles size={14} /> FIXED PROMPT</span><CopyButton text={fixed.enhanced_prompt} notify={notify} /></div>
+          <p className="fix-diagnosis">{fixed.diagnosis}</p>
+          <pre>{fixed.enhanced_prompt}</pre>
+          <div className="change-list">{fixed.changes.map((change) => <span key={change}><Check size={13} /> {change}</span>)}</div>
+          <div className="canvas-footer">
+            <SaveToLibrary prompt={fixed.enhanced_prompt} defaultTitle={fixed.title} source="refined" userId={userId} businessId={businessId} notify={notify} />
+            <button className="button button-secondary button-small" disabled={busy} onClick={() => { setActivePrompt(fixed.enhanced_prompt); run(fixed.enhanced_prompt); }}>Run the fixed prompt <Rocket size={14} /></button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1707,3 +2031,37 @@ function LoadingScreen() {
 }
 
 export default App;
+
+function LibraryScreen({ profile, usage, userId, notify, onUpgrade, onUsage }: {
+  profile: UserProfile;
+  usage: UsageStatus;
+  userId: string | null;
+  notify: (message: string) => void;
+  onUpgrade: () => void;
+  onUsage: (remaining: number | null) => void;
+}) {
+  const { ask, modal } = useUsageConfirm(usage, profile.plan, notify);
+  return (
+    <>
+      {modal}
+      <Library profile={profile} userId={userId} notify={notify} onUpgrade={onUpgrade}
+        renderRun={(prompt) => <RunPanel prompt={prompt} historyId={null} userId={userId} businessId={profile.active_business_id} ask={ask} notify={notify} onUsage={onUsage} />} />
+    </>
+  );
+}
+
+function ToolsScreen({ profile, usage, authenticated, notify, onUsage }: {
+  profile: UserProfile;
+  usage: UsageStatus;
+  authenticated: boolean;
+  notify: (message: string) => void;
+  onUsage: (remaining: number | null) => void;
+}) {
+  const { ask, modal } = useUsageConfirm(usage, profile.plan, notify);
+  return (
+    <>
+      {modal}
+      <Calculators ask={ask} authenticated={authenticated} notify={notify} onRemaining={onUsage} />
+    </>
+  );
+}

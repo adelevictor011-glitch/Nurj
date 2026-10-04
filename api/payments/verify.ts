@@ -17,7 +17,7 @@ const env = {
   // Groq is OpenAI-compatible. Set OPENAI_BASE_URL to Groq's endpoint and
   // OPENAI_API_KEY to a gsk_... key. Leave both unset to use real OpenAI.
   get openaiBaseUrl() { return process.env.OPENAI_BASE_URL || undefined; },
-  get openaiModel() { return process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile'; },
+  get openaiModel() { return process.env.OPENAI_MODEL || 'openai/gpt-oss-120b'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
   get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.
@@ -82,6 +82,8 @@ class AuthError extends Error {}
 const PLANS = {
   builder: { amount: 1_000_000, label: 'Builder' },
   operator: { amount: 2_500_000, label: 'Operator' },
+  // Option A add-on: one extra business slot for 30 days (paid plans only).
+  business_addon: { amount: 500_000, label: 'Extra business' },
 } as const;
 
 type PaidPlan = keyof typeof PLANS;
@@ -151,7 +153,7 @@ async function activatePayment(supabase: SupabaseClient, reference: string, tran
     p_paid_at: transaction.paid_at,
   });
   if (error) throw new Error('The plan could not be activated.');
-  return data as { activated: boolean; plan: PaidPlan; expires_at: string };
+  return data as { activated: boolean; plan: PaidPlan; expires_at?: string; needs_refund?: boolean; reason?: string };
 }
 
 // ---- endpoint ----

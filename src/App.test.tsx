@@ -9,15 +9,24 @@ afterEach(() => {
 });
 
 describe('Nurj application shell', () => {
+  it('asks for agreement to the Terms before starting', () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /run my signal scan/i }));
+    expect(screen.getByRole('alert').textContent).toMatch(/terms and privacy policy/i);
+    expect(screen.queryByText('How far has the business moved beyond your head?')).toBeNull();
+  });
+
   it('renders the landing experience and enters the signal scan', async () => {
     render(<App />);
     expect(screen.getByText('Build the business.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
     fireEvent.click(screen.getByRole('button', { name: /run my signal scan/i }));
     expect(await screen.findByText('How far has the business moved beyond your head?')).toBeTruthy();
   });
 
   it('completes guest onboarding and opens the command centre', async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
     fireEvent.click(screen.getByRole('button', { name: /run my signal scan/i }));
 
     const questions = [
