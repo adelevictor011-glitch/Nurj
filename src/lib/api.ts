@@ -24,6 +24,7 @@ async function request<T>(path: string, init: RequestInit = {}, anonymous = fals
 }
 
 export interface StatusResponse {
+  admin?: boolean;
   profile: UserProfile;
   usage: UsageStatus;
   history: PromptHistoryItem[];
@@ -58,6 +59,9 @@ export const api = {
       `/api/payments/verify?reference=${encodeURIComponent(reference)}`,
     ),
   account: () => request<{ refund: RefundStatus }>('/api/account'),
+  admin: () => request<AdminData>('/api/admin'),
+  adminGrant: (body: { email: string; plan: string; days: number; note: string }) =>
+    request<{ email: string; plan: string; expires_at: string | null }>('/api/admin', { method: 'POST', body: JSON.stringify(body) }),
   acceptTerms: (version: string) =>
     request<{ terms_version: string; terms_accepted_at: string }>('/api/account', {
       method: 'POST',
@@ -88,3 +92,23 @@ export const api = {
 export type RefundStatus =
   | { eligible: true; amount: number; plan: string; deadline: string }
   | { eligible: false; reason: string };
+
+export interface AdminData {
+  overview: {
+    users_total: number;
+    users_new_7d: number;
+    builder_active: number;
+    operator_active: number;
+    ever_paid: number;
+    revenue_30d_kobo: number;
+    refunds_30d_kobo: number;
+    tokens_today: number;
+    tokens_30d: number;
+    categories: Array<{ name: string; count: number }>;
+    stages: Array<{ name: string; count: number }>;
+    goals_30d: Array<{ goal: string; count: number }>;
+    top_ai_users_30d: Array<{ email: string; plan: string; calls: number; tokens: number }>;
+  };
+  wrap: Array<{ week_start: string; active_users: number; previous_active: number; retained_users: number; wrap: number | null }>;
+  grants: Array<{ target_email: string; plan: string; days: number; granted_by: string; note: string | null; created_at: string }>;
+}

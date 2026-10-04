@@ -10,6 +10,7 @@
 - [ ] Run `supabase/migrations/005_saved_snippets.sql` (saved task contexts and mentors / frameworks).
 - [ ] Run `supabase/migrations/006_spend_guardrails.sql` (daily AI budget, alerts, usage view).
 - [ ] Run `supabase/migrations/007_trust_layer.sql` (consent record, refunds, anonymised payment archive).
+- [ ] Run `supabase/migrations/008_admin_console.sql` (WRAP, admin overview, manual plan grants). Admins are `comp_accounts` rows with note `admin`.
 - [ ] Enable Google as an Auth provider.
 - [ ] Set the Site URL to the final Vercel domain.
 - [ ] Add `http://localhost:3000` and all Vercel preview/production callback URLs to the Auth redirect allow list.

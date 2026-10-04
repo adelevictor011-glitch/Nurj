@@ -10,6 +10,7 @@ export type ScreenKey =
   | 'guides'
   | 'history'
   | 'account'
+  | 'admin'
   | 'upgrade';
 
 export interface QuizOption {

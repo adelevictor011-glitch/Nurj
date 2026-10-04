@@ -43,6 +43,7 @@ import { api, type RefundStatus } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { SavedSnippets } from './components/SavedSnippets';
+import { AdminConsole } from './components/AdminConsole';
 import { ConsentCheckbox, ConsentGate, LegalLinks, LegalPage } from './components/Legal';
 import { LEGAL_VERSION, legalFromPath } from './legal';
 import type {
@@ -118,6 +119,7 @@ function App() {
   const [pendingReference, setPendingReference] = useState<string | null>(null);
   const [verifyState, setVerifyState] = useState<'idle' | 'verifying' | 'failed'>('idle');
   const [synced, setSynced] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [consented, setConsented] = useState(() => loadLocal<string>('nurj-consent', '') === LEGAL_VERSION);
   const legalKey = legalFromPath(window.location.pathname);
 
@@ -150,6 +152,7 @@ function App() {
       };
 
       setProfile(merged);
+      setIsAdmin(Boolean(status.admin));
       setUsage(status.usage);
       setHistory(status.history);
       localStorage.setItem('nurj-profile-v2', JSON.stringify(merged));
@@ -432,6 +435,7 @@ function App() {
               mobileMenu={mobileMenu}
               setMobileMenu={setMobileMenu}
               onSignOut={signOut}
+              isAdmin={isAdmin}
             >
               {screen === 'home' && (
                 <Dashboard
@@ -469,6 +473,7 @@ function App() {
               )}
               {screen === 'guides' && <Guides stageKey={profile.stage ?? 'launch'} plan={profile.plan} onUpgrade={() => setScreen('upgrade')} />}
               {screen === 'history' && <HistoryScreen history={history} notify={notify} />}
+              {screen === 'admin' && isAdmin && <AdminConsole notify={notify} />}
               {screen === 'account' && (
                 <Account
                   profile={profile}
@@ -799,6 +804,7 @@ function WorkspaceShell({
   mobileMenu: boolean;
   setMobileMenu: (open: boolean) => void;
   onSignOut: () => void;
+  isAdmin?: boolean;
 }) {
   return (
     <div className={`workspace ${compact ? 'sidebar-compact' : ''}`}>
@@ -821,6 +827,7 @@ function WorkspaceShell({
           {!compact && <div><small>CURRENT STAGE</small><strong>{STAGES[profile.stage ?? 'launch'].label}</strong></div>}
         </div>
         <div className="sidebar-bottom">
+          {isAdmin && <button className={screen === 'admin' ? 'active' : ''} onClick={() => { setScreen('admin'); setMobileMenu(false); }}><BarChart3 size={19} /><span>Admin</span></button>}
           <button onClick={() => { setScreen('account'); setMobileMenu(false); }}><CircleUserRound size={19} /><span>{user ? 'Account' : 'Guest profile'}</span></button>
           <button onClick={onSignOut}><LogOut size={19} /><span>{user ? 'Sign out' : 'Exit guest'}</span></button>
         </div>
@@ -830,7 +837,7 @@ function WorkspaceShell({
         <header className="app-header">
           <button className="mobile-menu-button" onClick={() => setMobileMenu(true)}><Menu size={20} /></button>
           <div className="app-header-context">
-            <span>{NAV_ITEMS.find((item) => item.screen === screen)?.label ?? 'Account'}</span>
+            <span>{NAV_ITEMS.find((item) => item.screen === screen)?.label ?? (screen === 'admin' ? 'Admin' : 'Account')}</span>
             <i />
             <small>{profile.plan === 'free' ? 'Free workspace' : `${profile.plan} active`}</small>
           </div>

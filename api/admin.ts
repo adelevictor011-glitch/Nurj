@@ -80,64 +80,62 @@ class AuthError extends Error {}
 
 // ---- endpoint ----
 
+// ---- admin console (roadmap feature 7) ----
+// Admins are comp_accounts rows with note = 'admin'. Every read and write
+// here runs on the server with the service role; the browser never gets
+// direct access to these tables or functions.
+
+class ForbiddenError extends Error {}
+
+async function requireAdmin(request: Request) {
+  const { user, supabase } = await requireUser(request);
+  const email = (user.email ?? '').toLowerCase();
+  const { data } = await supabase.from('comp_accounts').select('note').eq('email', email).maybeSingle();
+  if (!email || data?.note !== 'admin') throw new ForbiddenError('Admins only.');
+  return { user, supabase, email };
+}
+
+function errorStatus(error: unknown) {
+  return error instanceof AuthError ? 401 : error instanceof ForbiddenError ? 403 : 400;
+}
+
 export async function GET(request: Request): Promise<Response> {
   try {
-    const { user, supabase } = await requireUser(request);
-    const today = new Date().toISOString().slice(0, 10);
-
-    const [profileResult, usageResult, historyResult] = await Promise.all([
-      supabase.from('profiles').select('*').eq('id', user.id).single(),
-      supabase.from('daily_usage').select('prompt_count, enhance_count').eq('user_id', user.id).eq('usage_date', today).maybeSingle(),
-      supabase.from('prompt_history').select('id, kind, title, goal, output, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30),
+    const { supabase } = await requireAdmin(request);
+    const [overview, wrap, grants] = await Promise.all([
+      supabase.rpc('admin_overview'),
+      supabase.rpc('admin_wrap', { p_weeks: 8 }),
+      supabase.from('admin_grants').select('target_email, plan, days, granted_by, note, created_at').order('created_at', { ascending: false }).limit(10),
     ]);
-
-    // Self-heal: if the on_auth_user_created trigger never fired, create the
-    // row now instead of permanently bricking the account.
-    let profile = profileResult.data;
-    if (profileResult.error || !profile) {
-      const fallbackName =
-        (user.user_metadata?.full_name as string | undefined) ??
-        (user.user_metadata?.name as string | undefined) ??
-        user.email?.split('@')[0] ??
-        'Builder';
-      const { data: healed, error: healError } = await supabase.rpc('ensure_profile', {
-        p_user_id: user.id,
-        p_display_name: fallbackName,
-      });
-      if (healError || !healed) throw new Error('Your profile could not be loaded.');
-      profile = healed;
+    if (overview.error || wrap.error) {
+      throw new Error('Admin data could not be loaded. Check that migrations 006 to 008 have been run.');
     }
-    const expired = profile.plan !== 'free' && (!profile.plan_expires_at || new Date(profile.plan_expires_at) <= new Date());
-    if (expired) {
-      const { data: downgraded } = await supabase
-        .from('profiles')
-        .update({ plan: 'free', plan_expires_at: null, updated_at: new Date().toISOString() })
-        .eq('id', user.id)
-        .select('*')
-        .single();
-      if (downgraded) profile = downgraded;
-    }
-    const paid = profile.plan !== 'free' && Boolean(profile.plan_expires_at) && new Date(profile.plan_expires_at) > new Date();
-    const promptUsed = usageResult.data?.prompt_count ?? 0;
-    const enhanceUsed = usageResult.data?.enhance_count ?? 0;
-
-    // Admin flag only toggles the console link; api/admin re-checks on every call.
-    const { data: adminRow } = await supabase
-      .from('comp_accounts')
-      .select('note')
-      .eq('email', (user.email ?? '').toLowerCase())
-      .maybeSingle();
-
-    return json({
-      admin: adminRow?.note === 'admin',
-      profile,
-      usage: {
-        prompt: { used: promptUsed, limit: paid ? null : 5, remaining: paid ? null : Math.max(0, 5 - promptUsed) },
-        enhance: { used: enhanceUsed, limit: paid ? null : 3, remaining: paid ? null : Math.max(0, 3 - enhanceUsed) },
-      },
-      history: historyResult.data ?? [],
-    });
+    return json({ overview: overview.data, wrap: wrap.data ?? [], grants: grants.data ?? [] });
   } catch (error) {
-    return fail(safeMessage(error), error instanceof AuthError ? 401 : 500);
+    return fail(safeMessage(error), errorStatus(error));
+  }
+}
+
+export async function POST(request: Request): Promise<Response> {
+  try {
+    const { supabase, email } = await requireAdmin(request);
+    const body = await readJson<{ email?: unknown; plan?: unknown; days?: unknown; note?: unknown }>(request);
+    const target = assertText(body.email, 'Email', 254);
+    const plan = assertText(body.plan, 'Plan', 20);
+    const note = assertText(body.note, 'Note', 200, false);
+    const days = Number(body.days);
+    if (!Number.isInteger(days)) throw new Error('Days must be a whole number.');
+
+    const { data, error } = await supabase.rpc('admin_grant_plan', {
+      p_email: target,
+      p_plan: plan,
+      p_days: days,
+      p_granted_by: email,
+      p_note: note,
+    });
+    if (error) throw new Error(error.message);
+    return json(data);
+  } catch (error) {
+    return fail(safeMessage(error), errorStatus(error));
   }
 }
