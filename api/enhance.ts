@@ -174,6 +174,47 @@ async function spendLevel(supabase: SupabaseClient): Promise<SpendLevel> {
   return level;
 }
 
+// ---- email: Brevo (free plan: 300 a day), or Resend if only it is set ----
+function parseSender(value: string): { name?: string; email: string } {
+  const match = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(value);
+  return match ? { ...(match[1] ? { name: match[1] } : {}), email: match[2].trim() } : { email: value.trim() };
+}
+
+function emailConfigured(): boolean {
+  return Boolean((process.env.BREVO_API_KEY || process.env.RESEND_API_KEY) && process.env.REMINDER_FROM_EMAIL);
+}
+
+async function sendEmail(message: { to: string; subject: string; text: string; headers?: Record<string, string> }): Promise<boolean> {
+  const from = process.env.REMINDER_FROM_EMAIL;
+  const brevoKey = process.env.BREVO_API_KEY;
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!from || (!brevoKey && !resendKey)) return false;
+  try {
+    const response = brevoKey
+      ? await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: { 'api-key': brevoKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            sender: parseSender(from),
+            to: [{ email: message.to }],
+            subject: message.subject,
+            textContent: message.text,
+            ...(message.headers ? { headers: message.headers } : {}),
+          }),
+        })
+      : await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: message.to, subject: message.subject, text: message.text, ...(message.headers ? { headers: message.headers } : {}) }),
+        });
+    if (!response.ok) console.error('[email] send failed', response.status, await response.text().catch(() => ''));
+    return response.ok;
+  } catch (error) {
+    console.error('[email] send failed', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: number, budget: number) {
   try {
     const { data: claimed, error } = await supabase.rpc('claim_spend_alert', { p_level: level });
@@ -186,15 +227,8 @@ async function alertOnce(supabase: SupabaseClient, level: SpendLevel, used: numb
         ? 'Free and guest AI calls are paused until midnight WAT. Paid users continue on the cheaper model.'
         : 'New AI calls now use the cheaper model.');
     console.warn('[spend]', message);
-    const resendKey = process.env.RESEND_API_KEY;
-    const from = process.env.REMINDER_FROM_EMAIL;
     const to = process.env.ADMIN_ALERT_EMAIL;
-    if (!resendKey || !from || !to) return;
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject: `Nurj AI spend at ${percent}% of today's budget`, text: message }),
-    });
+    if (to) await sendEmail({ to, subject: `Nurj AI spend at ${percent}% of today's budget`, text: message });
   } catch (error) {
     console.error('[spend] alert failed', safeMessage(error));
   }
