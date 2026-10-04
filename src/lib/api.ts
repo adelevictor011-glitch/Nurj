@@ -23,7 +23,17 @@ async function request<T>(path: string, init: RequestInit = {}, anonymous = fals
   return payload;
 }
 
+export interface SectorInsights {
+  category: string;
+  min_reports: number;
+  total_reports: number;
+  sector_worked_pct: number | null;
+  goals: Array<{ goal: string; reports: number; worked_pct: number }>;
+  closest_goal: { goal: string; reports: number } | null;
+}
+
 export interface StatusResponse {
+  insights?: SectorInsights | null;
   admin?: boolean;
   profile: UserProfile;
   usage: UsageStatus;
@@ -128,6 +138,7 @@ export interface AdminData {
     digest_opted_out: number;
     payments_needing_refund: number;
   } | null;
+  insights: Array<{ category: string; reports: number; live_goals: number; best_goal_reports: number | null }> | null;
 }
 
 export interface ChannelResult {

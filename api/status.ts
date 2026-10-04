@@ -137,7 +137,16 @@ export async function GET(request: Request): Promise<Response> {
       .eq('email', (user.email ?? '').toLowerCase())
       .maybeSingle();
 
+    // Sector insights (feature 10). Only results with 30+ reports come back,
+    // so they switch on by themselves as reports arrive.
+    let insights: unknown = null;
+    if (profile.business_category) {
+      const { data: insightData, error: insightError } = await supabase.rpc('sector_insights', { p_category: profile.business_category, p_min: 30 });
+      if (!insightError) insights = insightData;
+    }
+
     return json({
+      insights,
       admin: adminRow?.note === 'admin',
       profile,
       usage: {

@@ -11,6 +11,9 @@
 - [ ] Run `supabase/migrations/006_spend_guardrails.sql` (daily AI budget, alerts, usage view).
 - [ ] Run `supabase/migrations/007_trust_layer.sql` (consent record, refunds, anonymised payment archive).
 - [ ] Run `supabase/migrations/008_admin_console.sql` (WRAP, admin overview, manual plan grants). Admins are `comp_accounts` rows with note `admin`.
+- [ ] Run `supabase/migrations/009_batches_2_to_4.sql`.
+- [ ] Run `supabase/migrations/010_sector_insights.sql` (insights switch on by themselves at 30 reports).
+- [ ] For the exact 07:30 WAT daily job, follow `supabase/scheduled/daily_job_0730_wat.sql`.
 - [ ] Enable Google as an Auth provider.
 - [ ] Set the Site URL to the final Vercel domain.
 - [ ] Add `http://localhost:3000` and all Vercel preview/production callback URLs to the Auth redirect allow list.
