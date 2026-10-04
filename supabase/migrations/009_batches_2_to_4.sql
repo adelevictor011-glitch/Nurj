@@ -131,6 +131,8 @@ security definer
 set search_path = public
 as $$
 begin
+  -- Serialise this user's inserts so parallel requests can't slip past the limit.
+  perform pg_advisory_xact_lock(hashtext(new.user_id::text));
   if (select count(*) from public.businesses where user_id = new.user_id) >= public.business_allowance(new.user_id) then
     raise exception 'You have reached your business limit for this plan.';
   end if;
@@ -347,6 +349,9 @@ begin
     -- Re-check at payment time: a plan can lapse, or two checkouts can be
     -- paid, between starting checkout and paying. Money taken for a slot
     -- that cannot be granted is flagged for refund instead.
+    -- Lock the buyer's profile so two add-on payments landing together are
+    -- counted one after the other.
+    perform 1 from public.profiles where id = v_payment.user_id for update;
     if public.active_plan(v_payment.user_id) = 'free'
        or (select count(*) from public.business_addons where user_id = v_payment.user_id and expires_at > now()) >= 2 then
       update public.payments set status = 'needs_refund' where reference = p_reference;
@@ -404,6 +409,8 @@ as $$
 declare
   v_limit integer;
 begin
+  -- Serialise this user's inserts so parallel requests can't slip past the limit.
+  perform pg_advisory_xact_lock(hashtext(new.user_id::text));
   v_limit := case public.active_plan(new.user_id) when 'operator' then null when 'builder' then 200 else 10 end;
   if v_limit is not null and (select count(*) from public.saved_prompts where user_id = new.user_id) >= v_limit then
     raise exception 'Your saved prompts library is full (% on your plan). Delete one or upgrade.', v_limit;
@@ -558,3 +565,86 @@ $$;
 
 revoke all on function public.digest_candidates(integer) from public, anon, authenticated;
 grant execute on function public.digest_candidates(integer) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7. Review fixes: atomic Builder run cap, and refunds for paid fair use.
+-- ---------------------------------------------------------------------------
+
+-- Builder's 10 runs a day, counted per Lagos day in one atomic step so
+-- parallel requests cannot slip past the cap.
+create table if not exists public.run_usage (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  usage_date date not null,
+  run_count integer not null default 0 check (run_count >= 0),
+  primary key (user_id, usage_date)
+);
+
+alter table public.run_usage enable row level security;
+revoke all on table public.run_usage from anon, authenticated;
+
+create or replace function public.consume_run_slot(p_user uuid, p_limit integer)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count integer;
+begin
+  insert into public.run_usage (user_id, usage_date, run_count)
+  values (p_user, (now() at time zone 'Africa/Lagos')::date, 1)
+  on conflict (user_id, usage_date) do update
+    set run_count = public.run_usage.run_count + 1
+    where public.run_usage.run_count < p_limit
+  returning run_count into v_count;
+  return v_count is not null;
+end;
+$$;
+
+create or replace function public.refund_run_slot(p_user uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.run_usage
+  set run_count = greatest(run_count - 1, 0)
+  where user_id = p_user and usage_date = (now() at time zone 'Africa/Lagos')::date;
+$$;
+
+revoke all on function public.consume_run_slot(uuid, integer) from public, anon, authenticated;
+revoke all on function public.refund_run_slot(uuid) from public, anon, authenticated;
+grant execute on function public.consume_run_slot(uuid, integer) to service_role;
+grant execute on function public.refund_run_slot(uuid) to service_role;
+
+-- A failed AI call now gives the slot back for paid plans too (it used to
+-- refund only the free counter, so paid failures ate fair-use calls).
+create or replace function public.refund_daily_quota(p_user_id uuid, p_kind text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_kind not in ('prompt', 'enhance') then
+    raise exception 'Invalid quota kind';
+  end if;
+
+  if public.active_plan(p_user_id) <> 'free' then
+    update public.paid_daily_usage
+    set call_count = greatest(call_count - 1, 0), updated_at = now()
+    where user_id = p_user_id and usage_date = current_date;
+  elsif p_kind = 'prompt' then
+    update public.daily_usage
+    set prompt_count = greatest(prompt_count - 1, 0), updated_at = now()
+    where user_id = p_user_id and usage_date = current_date;
+  else
+    update public.daily_usage
+    set enhance_count = greatest(enhance_count - 1, 0), updated_at = now()
+    where user_id = p_user_id and usage_date = current_date;
+  end if;
+end;
+$$;
+
+revoke all on function public.refund_daily_quota(uuid, text) from public, anon, authenticated;
+grant execute on function public.refund_daily_quota(uuid, text) to service_role;

@@ -395,18 +395,26 @@ export async function POST(request: Request): Promise<Response> {
     const mode = typeof body.mode === 'string' ? body.mode : 'enhance';
     if (!['enhance', 'refine', 'channel', 'script', 'pack'].includes(mode)) throw new Error('Unknown action.');
 
+    const PACK_CATEGORIES = ['beauty_skincare', 'fashion', 'food', 'design_creative', 'education', 'technology', 'commerce', 'finance', 'logistics', 'professional_services', 'other'];
+
     // ---- Operator monthly pack: cached per month, sector and stage ----
     if (mode === 'pack') {
       const { data: profile } = await supabase.from('profiles').select('plan, plan_expires_at, business_category, stage').eq('id', user.id).single();
       const operator = profile?.plan === 'operator' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date();
       if (!operator) throw new QuotaError('Monthly prompt packs are part of Operator.');
       const month = lagosMonth();
-      const category = profile?.business_category || 'other';
+      // business_category is user-writable, so only known sectors become
+      // cache keys; anything else shares the 'other' pack.
+      const category = PACK_CATEGORIES.includes(profile?.business_category ?? '') ? (profile?.business_category as string) : 'other';
       const stage = profile?.stage || 'launch';
       const cached = await supabase.from('prompt_packs').select('title, prompts, month').eq('month', month).eq('category', category).eq('stage', stage).maybeSingle();
       if (cached.data) return json(cached.data);
 
+      // A cache miss is a real AI call, so it counts like any other.
+      quotaKind = 'prompt';
       const level = await spendLevel(supabase);
+      await consumeQuota(supabase, user.id, 'prompt');
+      quotaConsumed = true;
       const { data: pack, usage } = await createStructuredResponse<{ title: string; prompts: Array<{ title: string; use_when: string; prompt: string }> }>({
         name: 'nurj_operator_pack',
         schema: packSchema,
@@ -447,7 +455,7 @@ export async function POST(request: Request): Promise<Response> {
     quotaKind = mode === 'enhance' ? 'enhance' : 'prompt';
     const level = await spendLevel(supabase);
     const quota = await consumeQuota(supabase, user.id, quotaKind);
-    quotaConsumed = quota.plan === 'free';
+    quotaConsumed = true;
     if (level === 'paused' && quota.plan === 'free') throw new SpendPausedError("Nurj has reached today's free AI capacity. Your free prompts come back at midnight, or upgrade to keep going now.");
 
     if (mode === 'enhance' || mode === 'refine') {

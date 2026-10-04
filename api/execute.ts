@@ -260,6 +260,7 @@ const BUILDER_DAILY_RUNS = 10;
 
 export async function POST(request: Request): Promise<Response> {
   let quotaConsumed = false;
+  let runSlotConsumed = false;
   let userId = '';
   let quotaClient: Awaited<ReturnType<typeof requireUser>>['supabase'] | null = null;
 
@@ -277,20 +278,17 @@ export async function POST(request: Request): Promise<Response> {
     const { data: profile } = await supabase.from('profiles').select('plan, plan_expires_at').eq('id', user.id).single();
     const activePlan = profile && profile.plan !== 'free' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date() ? profile.plan : 'free';
     if (activePlan === 'builder') {
-      const lagosMidnight = new Date(`${new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' })}T00:00:00+01:00`);
-      const { count } = await supabase
-        .from('prompt_runs')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .gte('created_at', lagosMidnight.toISOString());
-      if ((count ?? 0) >= BUILDER_DAILY_RUNS) {
+      const { data: slot, error: slotError } = await supabase.rpc('consume_run_slot', { p_user: user.id, p_limit: BUILDER_DAILY_RUNS });
+      if (slotError) throw new Error('Usage could not be checked.');
+      if (!slot) {
         throw new QuotaError(`Builder includes ${BUILDER_DAILY_RUNS} runs a day, and you have used them. Operator removes this cap, or your runs reset at midnight.`);
       }
+      runSlotConsumed = true;
     }
 
     const level = await spendLevel(supabase);
     const quota = await consumeQuota(supabase, user.id, 'prompt');
-    quotaConsumed = quota.plan === 'free';
+    quotaConsumed = true;
 
     if (level === 'paused' && quota.plan === 'free') throw new SpendPausedError("Nurj has reached today's free AI capacity. Your free prompts come back at midnight, or upgrade to keep going now.");
 
@@ -322,6 +320,7 @@ export async function POST(request: Request): Promise<Response> {
     return json({ output, remaining: quota.remaining, run_id: run?.id ?? null });
   } catch (error) {
     if (quotaConsumed && userId && quotaClient) await refundQuota(quotaClient, userId, 'prompt');
+    if (runSlotConsumed && userId && quotaClient) await quotaClient.rpc('refund_run_slot', { p_user: userId });
     const status = error instanceof AuthError ? 401 : error instanceof QuotaError ? 429 : error instanceof SpendPausedError ? 503 : error instanceof UpstreamError ? 502 : 400;
     return fail(safeMessage(error), status);
   }

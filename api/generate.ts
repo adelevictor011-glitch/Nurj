@@ -387,7 +387,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const level = await spendLevel(supabase);
     const quota = await consumeQuota(supabase, user.id, 'prompt');
-    quotaConsumed = quota.plan === 'free';
+    quotaConsumed = true;
     if (level === 'paused' && quota.plan === 'free') throw new SpendPausedError("Nurj has reached today's free AI capacity. Your free prompts come back at midnight, or upgrade to keep going now.");
 
     const { data: result, usage } = await createStructuredResponse<GeneratedPayload>({
