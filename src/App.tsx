@@ -1418,7 +1418,7 @@ function Guides({ stageKey, plan, onUpgrade }: { stageKey: StageKey; plan: PlanK
         <div className="guide-sections">
           {GUIDES[activeStage].map((section, index) => (
             <article className={`guide-section panel ${open === index ? 'open' : ''}`} key={section.title}>
-              <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks</small></div><ChevronDown size={18} /></button>
+              <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks · {section.items.filter((item) => item.free).length} free</small></div><ChevronDown size={18} /></button>
               <AnimatePresence initial={false}>{open === index && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="guide-items">{section.items.map((item) => { const locked = !item.free && plan === 'free'; return <button className={locked ? 'locked' : ''} key={item.title} onClick={() => (locked ? onUpgrade() : setReading(item))}><span className="guide-play"><BookOpen size={15} /></span><div><strong>{item.title}</strong><p>{item.description}</p><small>{item.minutes} min read · {locked ? 'Builder' : 'Available'}</small></div><ArrowRight size={15} /></button>; })}</motion.div>}</AnimatePresence>
             </article>
           ))}

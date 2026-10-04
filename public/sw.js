@@ -21,6 +21,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  // Public guide pages are separate static pages, not the app shell.
+  if (url.pathname === '/guides' || url.pathname.startsWith('/guides/')) return;
 
   // Pages: network first, fall back to the cached app shell.
   if (request.mode === 'navigate') {
