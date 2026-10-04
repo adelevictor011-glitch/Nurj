@@ -49,13 +49,20 @@ export const api = {
     request<{ recorded: true }>('/api/outcome', { method: 'POST', body: JSON.stringify(body) }),
   enhance: (body: Record<string, unknown>) =>
     request<EnhanceResult>('/api/enhance', { method: 'POST', body: JSON.stringify(body) }),
-  initializePayment: (plan: 'builder' | 'operator') =>
+  refine: (body: { prompt: string; output: string; complaint: string }) =>
+    request<EnhanceResult>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'refine', ...body }) }),
+  channel: (text: string, channel: string) =>
+    request<ChannelResult>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'channel', text, channel }) }),
+  priceScript: (body: { product: string; oldPrice: string; newPrice: string; reason: string; channel: string }) =>
+    request<ChannelResult>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'script', ...body }) }),
+  pack: () => request<PromptPack>('/api/enhance', { method: 'POST', body: JSON.stringify({ mode: 'pack' }) }),
+  initializePayment: (plan: 'builder' | 'operator' | 'business_addon') =>
     request<{ authorization_url: string; reference: string }>('/api/payments/initialize', {
       method: 'POST',
       body: JSON.stringify({ plan }),
     }),
   verifyPayment: (reference: string) =>
-    request<{ activated: boolean; plan: 'builder' | 'operator'; expires_at: string }>(
+    request<{ activated: boolean; plan: 'builder' | 'operator' | 'business_addon'; expires_at: string }>(
       `/api/payments/verify?reference=${encodeURIComponent(reference)}`,
     ),
   account: () => request<{ refund: RefundStatus }>('/api/account'),
@@ -112,4 +119,18 @@ export interface AdminData {
   };
   wrap: Array<{ week_start: string; active_users: number; previous_active: number; retained_users: number; wrap: number | null }>;
   grants: Array<{ target_email: string; plan: string; days: number; granted_by: string; note: string | null; created_at: string }>;
+}
+
+export interface ChannelResult {
+  channel: string;
+  limit: number;
+  subject: string;
+  text: string;
+  remaining?: number | null;
+}
+
+export interface PromptPack {
+  title: string;
+  month: string;
+  prompts: Array<{ title: string; use_when: string; prompt: string }>;
 }

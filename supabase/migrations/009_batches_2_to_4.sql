@@ -142,8 +142,12 @@ create policy businesses_update_unlocked on public.businesses
   using (auth.uid() = user_id and public.business_unlocked(id))
   with check (auth.uid() = user_id);
 drop policy if exists businesses_delete_own on public.businesses;
+-- The business in use cannot be deleted; switch first. (Deleting it would
+-- leave the profile pointing at nothing.)
 create policy businesses_delete_own on public.businesses
-  for delete to authenticated using (auth.uid() = user_id);
+  for delete to authenticated
+  using (auth.uid() = user_id
+         and id is distinct from (select active_business_id from public.profiles where id = auth.uid()));
 drop policy if exists business_addons_select_own on public.business_addons;
 create policy business_addons_select_own on public.business_addons
   for select to authenticated using (auth.uid() = user_id);
