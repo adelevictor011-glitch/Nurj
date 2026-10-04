@@ -51,6 +51,10 @@
 - [ ] Confirm refreshing the callback does not add another 30 days.
 - [ ] Switch to live keys only after the test checklist passes.
 
+## Search
+
+- [ ] After the guide library ships, submit `https://nurjai.com/sitemap.xml` in Google Search Console.
+
 ## Product QA
 
 - [ ] Test at 360px, 390px, tablet and desktop widths.
