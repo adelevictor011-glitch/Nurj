@@ -265,7 +265,10 @@ export async function POST(request: Request): Promise<Response> {
         .from('profiles')
         .update({ terms_version: version, terms_accepted_at: acceptedAt, updated_at: acceptedAt })
         .eq('id', user.id);
-      if (error) throw new Error('Your agreement could not be saved. Please try again.');
+      if (error) {
+        console.error('[account] consent save failed', error.code, error.message);
+        throw new Error('Your agreement could not be saved. Please try again.');
+      }
       return json({ terms_version: version, terms_accepted_at: acceptedAt });
     }
 
