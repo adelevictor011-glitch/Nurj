@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -98,8 +99,14 @@ interface PaymentRow {
   created_at: string;
 }
 
-async function refundEligibility(supabase: SupabaseClient, userId: string) {
-  const [{ data: payment }, { count }] = await Promise.all([
+function emailHash(email: string | undefined): string | null {
+  if (!email) return null;
+  return createHash('sha256').update(`${process.env.GUEST_IP_SALT ?? ''}:${email.trim().toLowerCase()}`).digest('hex');
+}
+
+async function refundEligibility(supabase: SupabaseClient, userId: string, email: string | undefined) {
+  const hash = emailHash(email);
+  const [{ data: payment }, { count }, { count: hashCount }] = await Promise.all([
     supabase
       .from('payments')
       .select('reference, plan, amount, currency, status, paid_at, verified_at, created_at')
@@ -109,11 +116,14 @@ async function refundEligibility(supabase: SupabaseClient, userId: string) {
       .limit(1)
       .maybeSingle(),
     supabase.from('refund_requests').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+    hash
+      ? supabase.from('refund_requests').select('id', { count: 'exact', head: true }).eq('email_hash', hash)
+      : Promise.resolve({ count: 0 }),
   ]);
 
   const row = payment as PaymentRow | null;
   if (!row) return { eligible: false as const, reason: 'No paid plan to refund.' };
-  if ((count ?? 0) > 0) return { eligible: false as const, reason: 'This account has already used its self-serve refund.' };
+  if ((count ?? 0) > 0 || (hashCount ?? 0) > 0) return { eligible: false as const, reason: 'This account has already used its self-serve refund.' };
 
   const paidAt = new Date(row.paid_at ?? row.verified_at ?? row.created_at);
   const deadline = new Date(paidAt.getTime() + REFUND_WINDOW_DAYS * 86_400_000);
@@ -130,6 +140,7 @@ async function paystackRefund(reference: string): Promise<{ ok: boolean; message
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ transaction: reference }),
+      signal: AbortSignal.timeout(10_000),
     });
     const payload = (await response.json().catch(() => ({}))) as { status?: boolean; message?: string };
     return { ok: response.ok && Boolean(payload.status), message: payload.message ?? `HTTP ${response.status}` };
@@ -158,7 +169,7 @@ async function notifyAdmin(subject: string, text: string) {
 export async function GET(request: Request): Promise<Response> {
   try {
     const { user, supabase } = await requireUser(request);
-    const refund = await refundEligibility(supabase, user.id);
+    const refund = await refundEligibility(supabase, user.id, user.email);
     return json({
       refund: refund.eligible
         ? { eligible: true, amount: refund.payment.amount, plan: refund.payment.plan, deadline: refund.deadline }
@@ -226,11 +237,17 @@ export async function POST(request: Request): Promise<Response> {
         .select('reference, plan, amount, currency, status, paid_at, created_at')
         .eq('user_id', user.id);
       if (payments?.length) {
-        const { error: archiveError } = await supabase.from('payment_archive').insert(payments);
+        const { error: archiveError } = await supabase
+          .from('payment_archive')
+          .upsert(payments, { onConflict: 'reference', ignoreDuplicates: true });
         if (archiveError) throw new Error('Your account could not be deleted. Please try again.');
       }
-      // Every user-owned table cascades from auth.users; model_usage and
-      // refund_requests keep anonymised rows (user_id set to null).
+      // Strip the two places personal text outlives the account. Everything
+      // else cascades from auth.users, or keeps anonymised rows (model_usage,
+      // refund_requests: user_id set to null; the email hash only blocks a
+      // second self-serve refund).
+      await supabase.from('refund_requests').update({ reason: null }).eq('user_id', user.id);
+      await supabase.from('admin_grants').update({ target_email: 'deleted account' }).eq('target_user', user.id);
       const { error } = await supabase.auth.admin.deleteUser(user.id);
       if (error) throw new Error('Your account could not be deleted. Please try again.');
       return json({ deleted: true });
@@ -238,18 +255,61 @@ export async function POST(request: Request): Promise<Response> {
 
     if (action === 'refund') {
       const reason = assertText(body.reason, 'Reason', 500, false);
-      const eligibility = await refundEligibility(supabase, user.id);
+      const eligibility = await refundEligibility(supabase, user.id, user.email);
       if (!eligibility.eligible) throw new Error(eligibility.reason);
       const payment = eligibility.payment;
 
+      const { data: profile } = await supabase.from('profiles').select('plan, plan_expires_at').eq('id', user.id).single();
+
       // Claim the refund first: the unique reference stops a double click
-      // from refunding twice.
+      // from refunding twice. The previous plan is kept for admin reversal.
       const { data: claim, error: claimError } = await supabase
         .from('refund_requests')
-        .insert({ user_id: user.id, payment_reference: payment.reference, amount: payment.amount, status: 'pending', reason: reason || null })
+        .insert({
+          user_id: user.id,
+          email_hash: emailHash(user.email),
+          payment_reference: payment.reference,
+          amount: payment.amount,
+          status: 'pending',
+          reason: reason || null,
+          previous_plan: profile?.plan ?? null,
+          previous_expires_at: profile?.plan_expires_at ?? null,
+        })
         .select('id')
         .single();
       if (claimError || !claim) throw new Error('A refund is already being processed for this payment.');
+
+      // Remove the 30 days this payment added BEFORE money moves, so a
+      // timeout or a manual refund can never leave paid time behind. If an
+      // earlier payment still has time left, fall back to that payment's plan
+      // (refunding an upgrade must not keep the higher plan).
+      const expires = profile?.plan_expires_at ? new Date(profile.plan_expires_at).getTime() - PLAN_DAYS * 86_400_000 : 0;
+      const stillPaid = expires > Date.now();
+      let fallbackPlan: string = 'free';
+      if (stillPaid) {
+        const { data: previous } = await supabase
+          .from('payments')
+          .select('plan')
+          .eq('user_id', user.id)
+          .eq('status', 'success')
+          .neq('reference', payment.reference)
+          .order('paid_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        fallbackPlan = previous?.plan ?? profile?.plan ?? 'free';
+      }
+      const { error: planError } = await supabase
+        .from('profiles')
+        .update({
+          plan: stillPaid ? fallbackPlan : 'free',
+          plan_expires_at: stillPaid ? new Date(expires).toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+      if (planError) {
+        await supabase.from('refund_requests').delete().eq('id', claim.id);
+        throw new Error('Your refund could not be started. Please try again.');
+      }
 
       const result = await paystackRefund(payment.reference);
       await supabase
@@ -257,25 +317,13 @@ export async function POST(request: Request): Promise<Response> {
         .update({ status: result.ok ? 'refunded' : 'pending', paystack_message: result.message })
         .eq('id', claim.id);
 
+      const amount = `₦${(payment.amount / 100).toLocaleString('en-NG')}`;
       if (!result.ok) {
-        await notifyAdmin('Nurj refund needs manual action', `User ${user.email ?? user.id} requested a refund for ${payment.reference} (₦${(payment.amount / 100).toLocaleString('en-NG')}). Paystack said: ${result.message}`);
+        await notifyAdmin('Nurj refund needs manual action', `User ${user.email ?? user.id} requested a refund for ${payment.reference} (${amount}). Their plan time has already been removed. Paystack said: ${result.message}`);
         return json({ status: 'pending', message: 'Your refund request is recorded. We will complete it within 2 working days.' });
       }
 
-      // Remove the 30 days that payment added.
-      const { data: profile } = await supabase.from('profiles').select('plan, plan_expires_at').eq('id', user.id).single();
-      const expires = profile?.plan_expires_at ? new Date(profile.plan_expires_at).getTime() - PLAN_DAYS * 86_400_000 : 0;
-      const stillPaid = expires > Date.now();
-      await supabase
-        .from('profiles')
-        .update({
-          plan: stillPaid ? profile?.plan : 'free',
-          plan_expires_at: stillPaid ? new Date(expires).toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
-
-      await notifyAdmin('Nurj refund issued', `Refunded ${payment.reference} (₦${(payment.amount / 100).toLocaleString('en-NG')}) for ${user.email ?? user.id}. Reason: ${reason || 'none given'}`);
+      await notifyAdmin('Nurj refund issued', `Refunded ${payment.reference} (${amount}) for ${user.email ?? user.id}. Reason: ${reason || 'none given'}`);
       return json({ status: 'refunded', message: 'Refund issued. Banks usually take 5 to 10 working days to show it.' });
     }
 

@@ -105,7 +105,7 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
         <article className="panel"><span>Users</span><strong>{number(o.users_total)}</strong><small>+{number(o.users_new_7d)} in 7 days</small></article>
         <article className="panel"><span>Paying now</span><strong>{number(paid)}</strong><small>{o.builder_active} Builder · {o.operator_active} Operator · goal 60</small></article>
         <article className="panel"><span>Free to paid</span><strong>{o.users_total ? `${((o.ever_paid / o.users_total) * 100).toFixed(1)}%` : '—'}</strong><small>Ever paid ÷ all users · goal 6%</small></article>
-        <article className="panel"><span>Revenue, 30 days</span><strong>{naira(o.revenue_30d_kobo - o.refunds_30d_kobo)}</strong><small>After {naira(o.refunds_30d_kobo)} refunds · goal ₦600k</small></article>
+        <article className="panel"><span>Revenue, 30 days</span><strong>{naira(o.revenue_30d_kobo - o.refunds_30d_kobo)}</strong><small>After {naira(o.refunds_30d_kobo)} refunds · goal ₦600k{o.refunds_pending ? ` · ${o.refunds_pending} refund${o.refunds_pending === 1 ? '' : 's'} need manual action` : ''}</small></article>
         <article className="panel"><span>AI tokens</span><strong>{number(o.tokens_today)}</strong><small>today · {number(o.tokens_30d)} in 30 days</small></article>
       </section>
 

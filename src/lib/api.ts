@@ -102,6 +102,7 @@ export interface AdminData {
     ever_paid: number;
     revenue_30d_kobo: number;
     refunds_30d_kobo: number;
+    refunds_pending: number;
     tokens_today: number;
     tokens_30d: number;
     categories: Array<{ name: string; count: number }>;

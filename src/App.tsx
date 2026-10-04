@@ -1498,7 +1498,8 @@ function Account({
       notify(result.message);
       setRefundOpen(false);
       setRefund({ eligible: false, reason: result.message });
-      if (result.status === 'refunded') onProfile({ ...profile, plan: 'free', plan_expires_at: null });
+      // The server already adjusted the plan; refresh to show what is left.
+      window.dispatchEvent(new Event('focus'));
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Your refund could not be requested.');
     } finally {

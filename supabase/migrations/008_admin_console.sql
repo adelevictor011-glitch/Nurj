@@ -64,6 +64,7 @@ as $$
     'ever_paid', (select count(distinct user_id) from public.payments where status = 'success'),
     'revenue_30d_kobo', (select coalesce(sum(amount), 0) from public.payments where status = 'success' and paid_at > now() - interval '30 days'),
     'refunds_30d_kobo', (select coalesce(sum(amount), 0) from public.refund_requests where status = 'refunded' and created_at > now() - interval '30 days'),
+    'refunds_pending', (select count(*) from public.refund_requests where status = 'pending'),
     'tokens_today', public.ai_tokens_today(),
     'tokens_30d', (select coalesce(sum(total_tokens), 0) from public.model_usage where created_at > now() - interval '30 days'),
     'categories', (select coalesce(jsonb_agg(jsonb_build_object('name', name, 'count', n) order by n desc), '[]'::jsonb)
