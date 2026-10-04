@@ -27,8 +27,8 @@ as $$
   from public.profiles where id = p_user;
 $$;
 
-revoke all on function public.active_plan(uuid) from public, anon;
-grant execute on function public.active_plan(uuid) to authenticated, service_role;
+revoke all on function public.active_plan(uuid) from public, anon, authenticated;
+grant execute on function public.active_plan(uuid) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- 17. Businesses (created first: saved prompts and wins reference them)
@@ -47,6 +47,11 @@ create table if not exists public.businesses (
 );
 
 create index if not exists businesses_user_created_idx on public.businesses(user_id, created_at);
+
+-- The profile keeps a copy of the active business so every existing screen
+-- and API keeps working unchanged.
+alter table public.profiles
+  add column if not exists active_business_id uuid references public.businesses(id) on delete set null;
 
 -- One row per paid add-on: each adds one business slot for 30 days.
 create table if not exists public.business_addons (
@@ -86,7 +91,10 @@ stable
 security definer
 set search_path = public
 as $$
-  with target as (select user_id from public.businesses where id = p_business),
+  with target as (
+    select user_id from public.businesses
+    where id = p_business and (auth.uid() is null or user_id = auth.uid())
+  ),
   ranked as (
     select b.id, row_number() over (order by b.created_at, b.id) as position
     from public.businesses b
@@ -98,10 +106,23 @@ as $$
   );
 $$;
 
-revoke all on function public.business_allowance(uuid) from public, anon;
+-- The signed-in user's own allowance, for the Settings screen.
+create or replace function public.my_business_allowance()
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.business_allowance(auth.uid());
+$$;
+
+revoke all on function public.business_allowance(uuid) from public, anon, authenticated;
 revoke all on function public.business_unlocked(uuid) from public, anon;
-grant execute on function public.business_allowance(uuid) to authenticated, service_role;
+revoke all on function public.my_business_allowance() from public, anon;
+grant execute on function public.business_allowance(uuid) to service_role;
 grant execute on function public.business_unlocked(uuid) to authenticated, service_role;
+grant execute on function public.my_business_allowance() to authenticated;
 
 create or replace function public.enforce_business_limit()
 returns trigger
@@ -152,10 +173,6 @@ drop policy if exists business_addons_select_own on public.business_addons;
 create policy business_addons_select_own on public.business_addons
   for select to authenticated using (auth.uid() = user_id);
 
--- The profile keeps a copy of the active business so every existing screen
--- and API keeps working unchanged.
-alter table public.profiles
-  add column if not exists active_business_id uuid references public.businesses(id) on delete set null;
 
 -- Keep the active business row in step with the profile fields. Saving
 -- business details anywhere (sign-up, Settings, Studio) updates it; a first
@@ -181,8 +198,10 @@ begin
     values (new.id, left(new.business_description, 60), new.business_description,
             new.target_customer, new.business_category, new.stage)
     returning id into new.active_business_id;
-  elsif tg_op = 'INSERT'
-     or new.business_description is distinct from old.business_description
+  elsif not public.business_unlocked(new.active_business_id) then
+    -- Locked (plan lapsed or slot refunded): the row stays read-only.
+    return new;
+  elsif new.business_description is distinct from old.business_description
      or new.target_customer is distinct from old.target_customer
      or new.business_category is distinct from old.business_category
      or new.stage is distinct from old.stage then
@@ -233,6 +252,37 @@ begin
 end;
 $$;
 
+-- If the active business became locked (plan lapsed, slot refunded), move
+-- the profile back to the oldest business, which is always unlocked.
+create or replace function public.ensure_active_business_unlocked(p_user uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_active uuid;
+  v_row public.businesses%rowtype;
+begin
+  select active_business_id into v_active from public.profiles where id = p_user;
+  if v_active is null or public.business_unlocked(v_active) then
+    return;
+  end if;
+  select * into v_row from public.businesses where user_id = p_user order by created_at, id limit 1;
+  update public.profiles
+  set active_business_id = v_row.id,
+      business_description = v_row.description,
+      target_customer = v_row.target_customer,
+      business_category = v_row.category,
+      stage = coalesce(v_row.stage, stage),
+      updated_at = now()
+  where id = p_user;
+end;
+$$;
+
+revoke all on function public.ensure_active_business_unlocked(uuid) from public, anon, authenticated;
+grant execute on function public.ensure_active_business_unlocked(uuid) to service_role;
+
 revoke all on function public.switch_business(uuid) from public, anon;
 grant execute on function public.switch_business(uuid) to authenticated;
 
@@ -273,6 +323,11 @@ begin
     raise exception 'Payment not found';
   end if;
 
+  if v_payment.status = 'needs_refund' then
+    return jsonb_build_object('activated', false, 'plan', v_payment.plan, 'needs_refund', true,
+      'reason', 'This business slot could not be added, so we will refund it within 2 working days.');
+  end if;
+
   if v_payment.status = 'success' then
     if v_payment.plan = 'business_addon' then
       select expires_at into v_expires from public.business_addons where payment_reference = p_reference;
@@ -289,6 +344,15 @@ begin
   where reference = p_reference;
 
   if v_payment.plan = 'business_addon' then
+    -- Re-check at payment time: a plan can lapse, or two checkouts can be
+    -- paid, between starting checkout and paying. Money taken for a slot
+    -- that cannot be granted is flagged for refund instead.
+    if public.active_plan(v_payment.user_id) = 'free'
+       or (select count(*) from public.business_addons where user_id = v_payment.user_id and expires_at > now()) >= 2 then
+      update public.payments set status = 'needs_refund' where reference = p_reference;
+      return jsonb_build_object('activated', false, 'plan', v_payment.plan, 'needs_refund', true,
+        'reason', 'This business slot could not be added, so we will refund it within 2 working days.');
+    end if;
     v_expires := now() + interval '30 days';
     insert into public.business_addons (user_id, payment_reference, expires_at)
     values (v_payment.user_id, p_reference, v_expires)
@@ -435,9 +499,62 @@ as $$
     'wins_total_kobo', (select coalesce(sum(amount_kobo), 0) from public.wins),
     'businesses', (select count(*) from public.businesses),
     'active_addons', (select count(*) from public.business_addons where expires_at > now()),
-    'digest_opted_out', (select count(*) from public.profiles where digest_opt_out)
+    'digest_opted_out', (select count(*) from public.profiles where digest_opt_out),
+    'payments_needing_refund', (select count(*) from public.payments where status = 'needs_refund')
   );
 $$;
 
 revoke all on function public.admin_feature_usage() from public, anon, authenticated;
 grant execute on function public.admin_feature_usage() to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 6. Digest candidates, aggregated in SQL (no row caps, fair ordering).
+--    Inactive people who already had their one win-back are excluded.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.digest_candidates(p_limit integer default 500)
+returns table (
+  id uuid,
+  display_name text,
+  stage text,
+  created_at timestamptz,
+  winback_sent boolean,
+  last_active_at timestamptz,
+  prompts_7d integer,
+  wins_7d_kobo bigint
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with activity as (
+    select user_id, max(created_at) as last_at,
+           count(*) filter (where created_at > now() - interval '7 days') as prompts_7d
+    from public.prompt_history
+    where created_at > now() - interval '21 days'
+    group by user_id
+  ),
+  won as (
+    select user_id, sum(amount_kobo) as total
+    from public.wins
+    where created_at > now() - interval '7 days'
+    group by user_id
+  )
+  select p.id, p.display_name, p.stage, p.created_at,
+         p.digest_winback_sent_at is not null,
+         a.last_at,
+         coalesce(a.prompts_7d, 0)::integer,
+         coalesce(w.total, 0)::bigint
+  from public.profiles p
+  left join activity a on a.user_id = p.id
+  left join won w on w.user_id = p.id
+  where not p.digest_opt_out
+    and (p.digest_last_sent_at is null or p.digest_last_sent_at < now() - interval '6 days')
+    and (a.last_at is not null or (p.digest_winback_sent_at is null and p.created_at < now() - interval '7 days'))
+  order by p.digest_last_sent_at nulls first, p.id
+  limit greatest(p_limit, 1);
+$$;
+
+revoke all on function public.digest_candidates(integer) from public, anon, authenticated;
+grant execute on function public.digest_candidates(integer) to service_role;

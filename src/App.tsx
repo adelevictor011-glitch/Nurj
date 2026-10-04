@@ -291,7 +291,9 @@ function App() {
           localStorage.removeItem('nurj-pending-reference');
           setPendingReference(null);
           setVerifyState('idle');
-          notify(result.plan === 'business_addon' ? 'Your extra business slot is now active.' : `${result.plan === 'builder' ? 'Builder' : 'Operator'} is now active.`);
+          notify(result.needs_refund
+            ? result.reason ?? 'That payment could not be applied, so we will refund it within 2 working days.'
+            : result.plan === 'business_addon' ? 'Your extra business slot is now active.' : `${result.plan === 'builder' ? 'Builder' : 'Operator'} is now active.`);
           await syncStatus({ redirect: false });
           return;
         } catch {

@@ -867,3 +867,5 @@ body.data-saver { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, san
   .win-form { grid-template-columns: 1fr; }
   .burn-line { grid-template-columns: 1fr 100px auto; }
 }
+
+.admin-alert { color: var(--gold); font-size: 10px; }

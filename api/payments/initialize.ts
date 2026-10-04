@@ -143,13 +143,16 @@ export async function POST(request: Request): Promise<Response> {
 
     if (plan === 'business_addon') {
       // Extra business slots need an active paid plan, and stop at two.
-      const [{ data: profile }, { count }] = await Promise.all([
+      const [{ data: profile }, { count }, { count: pending }] = await Promise.all([
         supabase.from('profiles').select('plan, plan_expires_at').eq('id', user.id).single(),
         supabase.from('business_addons').select('id', { count: 'exact', head: true }).eq('user_id', user.id).gt('expires_at', new Date().toISOString()),
+        supabase.from('payments').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('plan', 'business_addon')
+          .eq('status', 'initialized').gt('created_at', new Date(Date.now() - 3_600_000).toISOString()),
       ]);
       const paid = profile && profile.plan !== 'free' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date();
       if (!paid) throw new Error('Extra business slots are for Builder and Operator members.');
       if ((count ?? 0) >= 2) throw new Error('You already have the maximum of 2 extra business slots.');
+      if ((count ?? 0) + (pending ?? 0) >= 2) throw new Error('You have an unfinished checkout for a business slot. Complete it, or try again in an hour.');
     }
 
     const reference = `nurj-${plan}-${randomUUID().replaceAll('-', '')}`;

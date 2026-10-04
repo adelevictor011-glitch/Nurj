@@ -106,20 +106,26 @@ function emailHash(email: string | undefined): string | null {
 
 async function refundEligibility(supabase: SupabaseClient, userId: string, email: string | undefined) {
   const hash = emailHash(email);
-  const [{ data: payment }, { count }, { count: hashCount }] = await Promise.all([
+  const since = new Date(Date.now() - REFUND_WINDOW_DAYS * 86_400_000).toISOString();
+  const [{ data: payments }, { count }, { count: hashCount }] = await Promise.all([
     supabase
       .from('payments')
       .select('reference, plan, amount, currency, status, paid_at, verified_at, created_at')
       .eq('user_id', userId)
       .eq('status', 'success')
+      .gt('paid_at', since)
       .order('paid_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(10),
     supabase.from('refund_requests').select('id', { count: 'exact', head: true }).eq('user_id', userId),
     hash
       ? supabase.from('refund_requests').select('id', { count: 'exact', head: true }).eq('email_hash', hash)
       : Promise.resolve({ count: 0 }),
   ]);
+
+  // The guarantee covers plans first: if a plan and an add-on were both
+  // bought this week, the once-per-person refund goes to the plan.
+  const recent = (payments ?? []) as PaymentRow[];
+  const payment = recent.find((item) => item.plan !== 'business_addon') ?? recent[0] ?? null;
 
   const row = payment as PaymentRow | null;
   if (!row) return { eligible: false as const, reason: 'No paid plan to refund.' };
@@ -210,6 +216,10 @@ interface AccountBody {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    // Mail apps send one-click unsubscribes as a POST (RFC 8058).
+    const token = new URL(request.url).searchParams.get('unsubscribe');
+    if (token) return await unsubscribe(token);
+
     const { user, supabase } = await requireUser(request);
     const body = await readJson<AccountBody>(request);
     const action = assertText(body.action, 'Action', 20);
@@ -307,6 +317,7 @@ export async function POST(request: Request): Promise<Response> {
           await supabase.from('refund_requests').delete().eq('id', claim.id);
           throw new Error('Your refund could not be started. Please try again.');
         }
+        await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
       }
 
       // Remove the 30 days this payment added BEFORE money moves, so a
@@ -344,6 +355,7 @@ export async function POST(request: Request): Promise<Response> {
         await supabase.from('refund_requests').delete().eq('id', claim.id);
         throw new Error('Your refund could not be started. Please try again.');
       }
+      if (!isAddon) await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
 
       const result = await paystackRefund(payment.reference);
       await supabase

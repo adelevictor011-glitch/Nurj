@@ -153,7 +153,7 @@ async function activatePayment(supabase: SupabaseClient, reference: string, tran
     p_paid_at: transaction.paid_at,
   });
   if (error) throw new Error('The plan could not be activated.');
-  return data as { activated: boolean; plan: PaidPlan; expires_at: string };
+  return data as { activated: boolean; plan: PaidPlan; expires_at?: string; needs_refund?: boolean; reason?: string };
 }
 
 // ---- endpoint ----

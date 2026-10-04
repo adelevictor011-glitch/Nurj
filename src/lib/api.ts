@@ -62,7 +62,7 @@ export const api = {
       body: JSON.stringify({ plan }),
     }),
   verifyPayment: (reference: string) =>
-    request<{ activated: boolean; plan: 'builder' | 'operator' | 'business_addon'; expires_at: string }>(
+    request<{ activated: boolean; plan: 'builder' | 'operator' | 'business_addon'; expires_at?: string; needs_refund?: boolean; reason?: string }>(
       `/api/payments/verify?reference=${encodeURIComponent(reference)}`,
     ),
   account: () => request<{ refund: RefundStatus }>('/api/account'),
@@ -119,6 +119,15 @@ export interface AdminData {
   };
   wrap: Array<{ week_start: string; active_users: number; previous_active: number; retained_users: number; wrap: number | null }>;
   grants: Array<{ target_email: string; plan: string; days: number; granted_by: string; note: string | null; created_at: string }>;
+  features: {
+    saved_prompts: number;
+    wins_logged: number;
+    wins_total_kobo: number;
+    businesses: number;
+    active_addons: number;
+    digest_opted_out: number;
+    payments_needing_refund: number;
+  } | null;
 }
 
 export interface ChannelResult {

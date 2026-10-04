@@ -127,31 +127,27 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean) {
   const from = process.env.REMINDER_FROM_EMAIL;
   if (!resendKey || !from) return { skipped: 'email not configured' };
 
-  const sixDaysAgo = new Date(Date.now() - 6 * 86_400_000).toISOString();
   const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
-  const threeWeeksAgo = new Date(Date.now() - 21 * 86_400_000).toISOString();
 
-  const [{ data: profiles }, { data: recent }, { data: wins }, emails] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('id, display_name, stage, created_at, digest_winback_sent_at, digest_last_sent_at')
-      .eq('digest_opt_out', false)
-      .or(`digest_last_sent_at.is.null,digest_last_sent_at.lt.${sixDaysAgo}`)
-      .limit(500),
-    supabase.from('prompt_history').select('user_id, created_at').gt('created_at', threeWeeksAgo),
-    supabase.from('wins').select('user_id, amount_kobo').gt('created_at', weekAgo),
+  // Aggregated in SQL (migration 009): no row caps, fairest-first ordering,
+  // and people who already had their one win-back are excluded.
+  const [{ data: candidates, error }, emails] = await Promise.all([
+    supabase.rpc('digest_candidates', { p_limit: 500 }),
     allEmails(supabase),
   ]);
+  if (error) throw new Error('Digest candidates could not be read.');
 
-  const lastActive = new Map<string, number>();
-  const promptsThisWeek = new Map<string, number>();
-  for (const row of recent ?? []) {
-    const at = new Date(row.created_at as string).getTime();
-    lastActive.set(row.user_id, Math.max(lastActive.get(row.user_id) ?? 0, at));
-    if (row.created_at > weekAgo) promptsThisWeek.set(row.user_id, (promptsThisWeek.get(row.user_id) ?? 0) + 1);
+  interface Candidate {
+    id: string;
+    display_name: string | null;
+    stage: string | null;
+    created_at: string;
+    winback_sent: boolean;
+    last_active_at: string | null;
+    prompts_7d: number;
+    wins_7d_kobo: number;
   }
-  const winsThisWeek = new Map<string, number>();
-  for (const row of wins ?? []) winsThisWeek.set(row.user_id, (winsThisWeek.get(row.user_id) ?? 0) + Number(row.amount_kobo));
+  const profiles = (candidates ?? []) as Candidate[];
 
   const messages: Array<{ id: string; kind: 'digest' | 'winback'; email: Record<string, unknown> }> = [];
   for (const profile of profiles ?? []) {
@@ -160,11 +156,11 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean) {
     const name = (profile.display_name as string | null)?.split(' ')[0] || 'there';
     const unsubscribe = `${env.appUrl}/api/account?unsubscribe=${profile.id}.${digestToken(profile.id)}`;
     const headers = { 'List-Unsubscribe': `<${unsubscribe}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' };
-    const active = lastActive.has(profile.id);
+    const active = Boolean(profile.last_active_at);
 
     if (active) {
-      const won = winsThisWeek.get(profile.id) ?? 0;
-      const prompts = promptsThisWeek.get(profile.id) ?? 0;
+      const won = Number(profile.wins_7d_kobo);
+      const prompts = Number(profile.prompts_7d);
       const move = FIRST_MOVES[(profile.stage as string) ?? 'launch'] ?? FIRST_MOVES.launch;
       const share = `https://wa.me/?text=${encodeURIComponent(`This week's one move: ${move} (from Nurj)`)}`;
       messages.push({
@@ -176,7 +172,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean) {
           text: `Good morning ${name},\n\nLast week: ${prompts} prompt${prompts === 1 ? '' : 's'}${won > 0 ? ` and ${naira(won)} in logged wins` : ''}.\n\nThis week, do this first:\n${move}\n\nOpen Nurj and build the prompt for it: ${env.appUrl}\n\nShare the move on WhatsApp: ${share}\n\n— Nurj\n\nStop these Monday emails: ${unsubscribe}`,
         },
       });
-    } else if (!profile.digest_winback_sent_at && (profile.created_at as string) < weekAgo) {
+    } else if (!profile.winback_sent && profile.created_at < weekAgo) {
       messages.push({
         id: profile.id,
         kind: 'winback',
@@ -208,7 +204,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean) {
     if (digestIds.length) await supabase.from('profiles').update({ digest_last_sent_at: now }).in('id', digestIds);
     if (winbackIds.length) await supabase.from('profiles').update({ digest_last_sent_at: now, digest_winback_sent_at: now }).in('id', winbackIds);
   }
-  return { candidates: profiles?.length ?? 0, queued: messages.length, sent };
+  return { candidates: profiles.length, queued: messages.length, sent };
 }
 
 async function sendExpiryReminders(supabase: SupabaseClient) {

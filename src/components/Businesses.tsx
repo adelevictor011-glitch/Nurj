@@ -42,7 +42,7 @@ export function Businesses({
     if (!userId || !supabase) return;
     const [list, allowed, slots] = await Promise.all([
       supabase.from('businesses').select('id, name, description, target_customer, created_at').order('created_at').order('id'),
-      supabase.rpc('business_allowance', { p_user: userId }),
+      supabase.rpc('my_business_allowance'),
       supabase.from('business_addons').select('expires_at').gt('expires_at', new Date().toISOString()),
     ]);
     setItems((list.data ?? []) as Business[]);

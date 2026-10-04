@@ -153,7 +153,7 @@ async function activatePayment(supabase: SupabaseClient, reference: string, tran
     p_paid_at: transaction.paid_at,
   });
   if (error) throw new Error('The plan could not be activated.');
-  return data as { activated: boolean; plan: PaidPlan; expires_at: string };
+  return data as { activated: boolean; plan: PaidPlan; expires_at?: string; needs_refund?: boolean; reason?: string };
 }
 
 // ---- endpoint ----
@@ -175,7 +175,22 @@ export async function POST(request: Request): Promise<Response> {
 
     const supabase = adminClient();
     const transaction = await verifyTransaction(event.data.reference);
-    await activatePayment(supabase, event.data.reference, transaction);
+    const activation = await activatePayment(supabase, event.data.reference, transaction);
+    if (activation.needs_refund) {
+      // Money was taken for a business slot that could not be granted (plan
+      // lapsed or already at 2 slots). Tell the admin to refund it.
+      const resendKey = process.env.RESEND_API_KEY;
+      const from = process.env.REMINDER_FROM_EMAIL;
+      const to = process.env.ADMIN_ALERT_EMAIL;
+      console.warn('[webhook] payment needs refund', event.data.reference);
+      if (resendKey && from && to) {
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to, subject: 'Nurj payment needs a refund', text: `Payment ${event.data.reference} was taken for a business slot that could not be added. Refund it in Paystack.` }),
+        }).catch(() => undefined);
+      }
+    }
     return json({ received: true });
   } catch (error) {
     return fail(safeMessage(error), 400);
