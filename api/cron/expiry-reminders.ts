@@ -250,6 +250,9 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
 }
 
 async function sendExpiryReminders(supabase: SupabaseClient) {
+  // Without an email provider, do nothing: marking people as reminded here
+  // would mean they never get the reminder once email is switched on.
+  if (!emailConfigured()) return { checked: 0, sent: 0, skipped: 'email not configured' };
   const windowStart = new Date();
   const windowEnd = new Date(Date.now() + 3 * 86_400_000);
 
