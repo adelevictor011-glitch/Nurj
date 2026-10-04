@@ -793,6 +793,7 @@ function WorkspaceShell({
   mobileMenu,
   setMobileMenu,
   onSignOut,
+  isAdmin = false,
 }: {
   children: React.ReactNode;
   screen: ScreenKey;
