@@ -85,7 +85,7 @@ class AuthError extends Error {}
  * Runs daily via Vercel Cron. Reaches the customer whose access ends in three
  * days — previously the only signal was getting blocked mid-task.
  *
- * If RESEND_API_KEY is absent the job still runs and reports who is due, so
+ * If no email provider (BREVO_API_KEY or RESEND_API_KEY) is set the job still runs and reports who is due, so
  * you can send manually until an email provider is connected.
  */
 // ---- Monday momentum digest (roadmap feature 6) ----
@@ -119,12 +119,53 @@ async function allEmails(supabase: SupabaseClient): Promise<Map<string, string>>
   return emails;
 }
 
-// Free email plans cap daily sends (Resend free: 100 a day; Brevo free: 300).
+// Free email plans cap daily sends (Brevo free: 300 a day; Resend free: 100).
 // EMAIL_DAILY_LIMIT keeps the job under that cap; if more people are due, the
 // digest carries on Tuesday to Thursday until everyone has this week's email.
 function emailDailyLimit(): number {
   const value = Number(process.env.EMAIL_DAILY_LIMIT);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 90;
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 280;
+}
+
+// ---- email: Brevo (free plan: 300 a day), or Resend if only it is set ----
+function parseSender(value: string): { name?: string; email: string } {
+  const match = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(value);
+  return match ? { ...(match[1] ? { name: match[1] } : {}), email: match[2].trim() } : { email: value.trim() };
+}
+
+function emailConfigured(): boolean {
+  return Boolean((process.env.BREVO_API_KEY || process.env.RESEND_API_KEY) && process.env.REMINDER_FROM_EMAIL);
+}
+
+async function sendEmail(message: { to: string; subject: string; text: string; headers?: Record<string, string> }): Promise<boolean> {
+  const from = process.env.REMINDER_FROM_EMAIL;
+  const brevoKey = process.env.BREVO_API_KEY;
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!from || (!brevoKey && !resendKey)) return false;
+  try {
+    const response = brevoKey
+      ? await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: { 'api-key': brevoKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            sender: parseSender(from),
+            to: [{ email: message.to }],
+            subject: message.subject,
+            textContent: message.text,
+            ...(message.headers ? { headers: message.headers } : {}),
+          }),
+        })
+      : await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: message.to, subject: message.subject, text: message.text, ...(message.headers ? { headers: message.headers } : {}) }),
+        });
+    if (!response.ok) console.error('[email] send failed', response.status, await response.text().catch(() => ''));
+    return response.ok;
+  } catch (error) {
+    console.error('[email] send failed', error instanceof Error ? error.message : error);
+    return false;
+  }
 }
 
 async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget: number) {
@@ -132,9 +173,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
   if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday'].includes(weekday) && !force) return { skipped: 'not a digest day' };
   if (budget <= 0) return { skipped: 'daily email limit reached' };
 
-  const resendKey = process.env.RESEND_API_KEY;
-  const from = process.env.REMINDER_FROM_EMAIL;
-  if (!resendKey || !from) return { skipped: 'email not configured' };
+  if (!emailConfigured()) return { skipped: 'email not configured' };
 
   const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
 
@@ -158,7 +197,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
   }
   const profiles = (candidates ?? []) as Candidate[];
 
-  const messages: Array<{ id: string; kind: 'digest' | 'winback'; email: Record<string, unknown> }> = [];
+  const messages: Array<{ id: string; kind: 'digest' | 'winback'; email: { to: string; subject: string; text: string; headers?: Record<string, string> } }> = [];
   for (const profile of profiles ?? []) {
     const to = emails.get(profile.id);
     if (!to) continue;
@@ -176,7 +215,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
         id: profile.id,
         kind: 'digest',
         email: {
-          from, to, headers,
+          to, headers,
           subject: won > 0 ? `${naira(won)} in wins last week. Here's this week's move.` : `Your one move for this week, ${name}`,
           text: `Good morning ${name},\n\nLast week: ${prompts} prompt${prompts === 1 ? '' : 's'}${won > 0 ? ` and ${naira(won)} in logged wins` : ''}.\n\nThis week, do this first:\n${move}\n\nOpen Nurj and build the prompt for it: ${env.appUrl}\n\nShare the move on WhatsApp: ${share}\n\n— Nurj\n\nStop these Monday emails: ${unsubscribe}`,
         },
@@ -186,7 +225,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
         id: profile.id,
         kind: 'winback',
         email: {
-          from, to, headers,
+          to, headers,
           subject: `${name}, one 10-minute move for your business`,
           text: `Hi ${name},\n\nIt has been a while. Here is one small move that tends to bring the next customer closer:\n\n${FIRST_MOVES[(profile.stage as string) ?? 'launch'] ?? FIRST_MOVES.launch}\n\nNurj will write the exact prompt for it in under a minute: ${env.appUrl}\n\nThis is the only reminder we will send.\n\n— Nurj\n\nStop these emails: ${unsubscribe}`,
         },
@@ -194,22 +233,16 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
     }
   }
 
+  // One message per person (each has its own unsubscribe link), 10 at a time.
   let sent = 0;
-  for (let index = 0; index < messages.length; index += 100) {
-    const batch = messages.slice(index, index + 100);
-    const response = await fetch('https://api.resend.com/emails/batch', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(batch.map((message) => message.email)),
-    });
-    if (!response.ok) {
-      console.error('[digest] batch failed', response.status, await response.text().catch(() => ''));
-      continue;
-    }
-    sent += batch.length;
+  for (let index = 0; index < messages.length; index += 10) {
+    const batch = messages.slice(index, index + 10);
+    const results = await Promise.all(batch.map((message) => sendEmail(message.email)));
+    const delivered = batch.filter((_, position) => results[position]);
+    sent += delivered.length;
     const now = new Date().toISOString();
-    const digestIds = batch.filter((message) => message.kind === 'digest').map((message) => message.id);
-    const winbackIds = batch.filter((message) => message.kind === 'winback').map((message) => message.id);
+    const digestIds = delivered.filter((message) => message.kind === 'digest').map((message) => message.id);
+    const winbackIds = delivered.filter((message) => message.kind === 'winback').map((message) => message.id);
     if (digestIds.length) await supabase.from('profiles').update({ digest_last_sent_at: now }).in('id', digestIds);
     if (winbackIds.length) await supabase.from('profiles').update({ digest_last_sent_at: now, digest_winback_sent_at: now }).in('id', winbackIds);
   }
@@ -232,31 +265,23 @@ async function sendExpiryReminders(supabase: SupabaseClient) {
   const rows = due ?? [];
   if (!rows.length) return { checked: 0, sent: 0 };
 
-  const resendKey = process.env.RESEND_API_KEY;
-  const from = process.env.REMINDER_FROM_EMAIL;
   let sent = 0;
 
   for (const row of rows) {
     let delivered = false;
 
-    if (resendKey && from) {
+    if (emailConfigured()) {
       const { data: authUser } = await supabase.auth.admin.getUserById(row.id);
       const email = authUser?.user?.email;
       if (email) {
         const expires = new Date(row.plan_expires_at as string).toLocaleDateString('en-NG', {
           day: 'numeric', month: 'long', year: 'numeric',
         });
-        const response = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from,
-            to: email,
-            subject: 'Your Nurj access ends in 3 days',
-            text: `Hi ${row.display_name ?? 'there'},\n\nYour Nurj ${row.plan === 'builder' ? 'Builder' : 'Operator'} access ends on ${expires}.\n\nRenewing keeps the daily limits off and your saved history exactly where it is: ${env.appUrl}\n\nIf you would rather pause, nothing happens automatically — you simply move back to the free plan.\n\n— Nurj`,
-          }),
+        delivered = await sendEmail({
+          to: email,
+          subject: 'Your Nurj access ends in 3 days',
+          text: `Hi ${row.display_name ?? 'there'},\n\nYour Nurj ${row.plan === 'builder' ? 'Builder' : 'Operator'} access ends on ${expires}.\n\nRenewing keeps the daily limits off and your saved history exactly where it is: ${env.appUrl}\n\nIf you would rather pause, nothing happens automatically — you simply move back to the free plan.\n\n— Nurj`,
         });
-        delivered = response.ok;
       }
     }
 
@@ -268,7 +293,7 @@ async function sendExpiryReminders(supabase: SupabaseClient) {
     if (delivered) sent += 1;
   }
 
-  return { checked: rows.length, sent, emailConfigured: Boolean(resendKey && from) };
+  return { checked: rows.length, sent, emailConfigured: emailConfigured() };
 }
 
 export async function GET(request: Request): Promise<Response> {
