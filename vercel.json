@@ -49,7 +49,7 @@
   "crons": [
     {
       "path": "/api/cron/expiry-reminders",
-      "schedule": "0 9 * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }

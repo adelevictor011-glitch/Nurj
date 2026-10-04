@@ -256,6 +256,8 @@ async function callModel(params: { level: SpendLevel; system: string; user: stri
  * This is the difference between a prompt formatter and an operating layer:
  * the outcome now happens inside Nurj, so we can ask whether it worked.
  */
+const BUILDER_DAILY_RUNS = 10;
+
 export async function POST(request: Request): Promise<Response> {
   let quotaConsumed = false;
   let userId = '';
@@ -269,6 +271,22 @@ export async function POST(request: Request): Promise<Response> {
     const body = await readJson<{ prompt?: unknown; historyId?: unknown }>(request);
     const prompt = assertText(body.prompt, 'Prompt', 8000);
     const historyId = assertText(body.historyId, 'History reference', 60, false);
+
+    // Roadmap feature 4: Builder includes 10 runs a day; Operator is uncapped
+    // (still inside the 150-a-day fair-use ceiling).
+    const { data: profile } = await supabase.from('profiles').select('plan, plan_expires_at').eq('id', user.id).single();
+    const activePlan = profile && profile.plan !== 'free' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date() ? profile.plan : 'free';
+    if (activePlan === 'builder') {
+      const lagosMidnight = new Date(`${new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' })}T00:00:00+01:00`);
+      const { count } = await supabase
+        .from('prompt_runs')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .gte('created_at', lagosMidnight.toISOString());
+      if ((count ?? 0) >= BUILDER_DAILY_RUNS) {
+        throw new QuotaError(`Builder includes ${BUILDER_DAILY_RUNS} runs a day, and you have used them. Operator removes this cap, or your runs reset at midnight.`);
+      }
+    }
 
     const level = await spendLevel(supabase);
     const quota = await consumeQuota(supabase, user.id, 'prompt');

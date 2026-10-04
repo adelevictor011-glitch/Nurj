@@ -82,6 +82,8 @@ class AuthError extends Error {}
 const PLANS = {
   builder: { amount: 1_000_000, label: 'Builder' },
   operator: { amount: 2_500_000, label: 'Operator' },
+  // Option A add-on: one extra business slot for 30 days (paid plans only).
+  business_addon: { amount: 500_000, label: 'Extra business' },
 } as const;
 
 type PaidPlan = keyof typeof PLANS;

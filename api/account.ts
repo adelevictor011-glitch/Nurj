@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -166,8 +166,29 @@ async function notifyAdmin(subject: string, text: string) {
   }
 }
 
+// One-click unsubscribe for the Monday digest (feature 6). The token is an
+// HMAC of the user id, so links cannot be forged for other accounts.
+function digestToken(userId: string): string {
+  return createHmac('sha256', `digest:${process.env.GUEST_IP_SALT ?? ''}`).update(userId).digest('hex').slice(0, 32);
+}
+
+async function unsubscribe(token: string): Promise<Response> {
+  const [userId, signature] = token.split('.');
+  const page = (message: string, status = 200) =>
+    new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nurj</title><body style="font-family:system-ui;background:#080907;color:#f5f6ef;display:grid;place-items:center;min-height:90vh;padding:16px"><div style="max-width:420px"><h1 style="font-size:20px">${message}</h1><p style="color:#9da294">You can switch the Monday digest back on in Nurj, under Settings.</p><a style="color:#edb84c" href="/">Open Nurj</a></div>`, {
+      status,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  if (!userId || !signature || signature !== digestToken(userId)) return page('That unsubscribe link is not valid.', 400);
+  const { error } = await adminClient().from('profiles').update({ digest_opt_out: true }).eq('id', userId);
+  if (error) return page('Something went wrong. Please try again.', 500);
+  return page('You will no longer get the Monday digest.');
+}
+
 export async function GET(request: Request): Promise<Response> {
   try {
+    const token = new URL(request.url).searchParams.get('unsubscribe');
+    if (token) return await unsubscribe(token);
     const { user, supabase } = await requireUser(request);
     const refund = await refundEligibility(supabase, user.id, user.email);
     return json({
@@ -279,10 +300,20 @@ export async function POST(request: Request): Promise<Response> {
         .single();
       if (claimError || !claim) throw new Error('A refund is already being processed for this payment.');
 
+      if (payment.plan === 'business_addon') {
+        // An add-on refund removes that business slot; the plan is untouched.
+        const { error: slotError } = await supabase.from('business_addons').delete().eq('payment_reference', payment.reference);
+        if (slotError) {
+          await supabase.from('refund_requests').delete().eq('id', claim.id);
+          throw new Error('Your refund could not be started. Please try again.');
+        }
+      }
+
       // Remove the 30 days this payment added BEFORE money moves, so a
       // timeout or a manual refund can never leave paid time behind. If an
       // earlier payment still has time left, fall back to that payment's plan
       // (refunding an upgrade must not keep the higher plan).
+      const isAddon = payment.plan === 'business_addon';
       const expires = profile?.plan_expires_at ? new Date(profile.plan_expires_at).getTime() - PLAN_DAYS * 86_400_000 : 0;
       const stillPaid = expires > Date.now();
       let fallbackPlan: string = 'free';
@@ -293,19 +324,22 @@ export async function POST(request: Request): Promise<Response> {
           .eq('user_id', user.id)
           .eq('status', 'success')
           .neq('reference', payment.reference)
+          .in('plan', ['builder', 'operator'])
           .order('paid_at', { ascending: false })
           .limit(1)
           .maybeSingle();
         fallbackPlan = previous?.plan ?? profile?.plan ?? 'free';
       }
-      const { error: planError } = await supabase
-        .from('profiles')
-        .update({
-          plan: stillPaid ? fallbackPlan : 'free',
-          plan_expires_at: stillPaid ? new Date(expires).toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
+      const { error: planError } = isAddon
+        ? { error: null }
+        : await supabase
+            .from('profiles')
+            .update({
+              plan: stillPaid ? fallbackPlan : 'free',
+              plan_expires_at: stillPaid ? new Date(expires).toISOString() : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id);
       if (planError) {
         await supabase.from('refund_requests').delete().eq('id', claim.id);
         throw new Error('Your refund could not be started. Please try again.');
