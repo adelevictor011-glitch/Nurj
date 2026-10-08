@@ -1,0 +1,35 @@
+name: Generate lockfile
+
+# Creates or refreshes package-lock.json on a branch (never on main) so every
+# install uses exact, reviewed versions. Run it whenever package.json changes.
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths: [package.json, .github/workflows/lockfile.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Resolve exact versions (no install scripts run)
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Check for known critical vulnerabilities
+        run: npm audit --package-lock-only --audit-level=critical || echo "::warning::npm audit reported critical issues"
+      - name: Commit lockfile
+        run: |
+          if git diff --quiet -- package-lock.json && git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            echo "Lockfile already up to date."; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "Lock dependency versions"
+          git push

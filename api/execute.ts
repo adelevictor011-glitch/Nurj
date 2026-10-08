@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -43,11 +43,35 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  if (!(error instanceof Error)) return true;
+  if (error instanceof ServerError) return true;
+  // Plain Error and the custom classes in this file carry user-facing messages.
+  // Built-in errors (TypeError, SyntaxError, AbortError, ...) are bugs or outages.
+  return error.constructor !== Error && Object.getPrototypeOf(error.constructor) !== Error;
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -80,6 +104,15 @@ async function requireUser(request: Request) {
 
 class AuthError extends Error {}
 
+// Only link records the signed-in user owns. A reference to anyone else's
+// row (or a malformed one) is dropped, never trusted.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function ownedId(supabase: SupabaseClient, table: 'prompt_history' | 'prompt_runs', id: string, userId: string): Promise<string | null> {
+  if (!id || !UUID.test(id)) return null;
+  const { data } = await supabase.from(table).select('id').eq('id', id).eq('user_id', userId).maybeSingle();
+  return data?.id ?? null;
+}
+
 interface QuotaResult {
   allowed: boolean;
   plan: string;
@@ -93,7 +126,7 @@ async function consumeQuota(supabase: SupabaseClient, userId: string, kind: 'pro
     p_user_id: userId,
     p_kind: kind,
   });
-  if (error) throw new Error('Usage could not be checked.');
+  if (error) throw new ServerError('Usage could not be checked.');
   const result = data as QuotaResult;
   if (!result.allowed) {
     const label = kind === 'prompt' ? 'prompts' : 'enhancements';
@@ -149,7 +182,7 @@ function openai() {
 //   80% to 100% -> cheaper model only
 //   over 100%   -> free and guest calls pause until midnight WAT; paid calls
 //                  continue on the cheaper model
-// Reading the spend fails open: a telemetry hiccup must never block users.
+// Reading the spend fails closed for free and guest use (see spendLevel).
 
 class SpendPausedError extends Error {}
 class UpstreamError extends Error {}
@@ -166,8 +199,10 @@ function dailyTokenBudget(): number {
 async function spendLevel(supabase: SupabaseClient): Promise<SpendLevel> {
   const { data, error } = await supabase.rpc('ai_tokens_today');
   if (error) {
-    console.error('[spend] could not read today\'s spend', error.message);
-    return 'normal';
+    // Fail closed: if spend can't be read, treat today as over budget. Free and
+    // guest AI pauses; paid members continue on the lighter model.
+    console.error('[spend] could not read today\'s spend; pausing free AI', error.message);
+    return 'paused';
   }
   const used = Number(data ?? 0);
   const budget = dailyTokenBudget();
@@ -339,7 +374,7 @@ export async function POST(request: Request): Promise<Response> {
     const activePlan = profile && profile.plan !== 'free' && profile.plan_expires_at && new Date(profile.plan_expires_at) > new Date() ? profile.plan : 'free';
     if (activePlan === 'builder') {
       const { data: slot, error: slotError } = await supabase.rpc('consume_run_slot', { p_user: user.id, p_limit: BUILDER_DAILY_RUNS });
-      if (slotError) throw new Error('Usage could not be checked.');
+      if (slotError) throw new ServerError('Usage could not be checked.');
       if (!slot) {
         throw new QuotaError(`Builder includes ${BUILDER_DAILY_RUNS} runs a day, and you have used them. Operator removes this cap, or your runs reset at midnight.`);
       }
@@ -371,7 +406,7 @@ export async function POST(request: Request): Promise<Response> {
       .from('prompt_runs')
       .insert({
         user_id: user.id,
-        history_id: historyId || null,
+        history_id: await ownedId(supabase, 'prompt_history', historyId, user.id),
         prompt,
         output,
       })
@@ -383,6 +418,6 @@ export async function POST(request: Request): Promise<Response> {
     if (quotaConsumed && userId && quotaClient) await refundQuota(quotaClient, userId, 'prompt');
     if (runSlotConsumed && userId && quotaClient) await quotaClient.rpc('refund_run_slot', { p_user: userId });
     const status = error instanceof AuthError ? 401 : error instanceof QuotaError ? 429 : error instanceof SpendPausedError ? 503 : error instanceof UpstreamError ? 502 : 400;
-    return fail(safeMessage(error), status);
+    return fail(safeMessage(error), statusFor(error, status));
   }
 }

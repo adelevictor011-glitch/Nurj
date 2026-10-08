@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -42,11 +42,35 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  if (!(error instanceof Error)) return true;
+  if (error instanceof ServerError) return true;
+  // Plain Error and the custom classes in this file carry user-facing messages.
+  // Built-in errors (TypeError, SyntaxError, AbortError, ...) are bugs or outages.
+  return error.constructor !== Error && Object.getPrototypeOf(error.constructor) !== Error;
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -100,8 +124,12 @@ const FIRST_MOVES: Record<string, string> = {
   exit: 'Calculate the exact monthly revenue and runway required to resign safely.',
 };
 
+// Signed with a key derived from the service-role secret (always set, never
+// shared with guest-IP hashing). Throws if it is missing, so links can't be
+// signed with an empty key.
 function digestToken(userId: string): string {
-  return createHmac('sha256', `digest:${process.env.GUEST_IP_SALT ?? ''}`).update(userId).digest('hex').slice(0, 32);
+  const key = createHmac('sha256', env.supabaseServiceRoleKey).update('nurj:digest-unsubscribe:v2').digest();
+  return createHmac('sha256', key).update(userId).digest('hex').slice(0, 32);
 }
 
 function naira(kobo: number): string {
@@ -186,7 +214,7 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
     supabase.rpc('digest_candidates', { p_limit: Math.min(budget, 500) }),
     allEmails(supabase),
   ]);
-  if (error) throw new Error('Digest candidates could not be read.');
+  if (error) throw new ServerError('Digest candidates could not be read.');
 
   interface Candidate {
     id: string;
@@ -267,7 +295,7 @@ async function sendExpiryReminders(supabase: SupabaseClient) {
     .lte('plan_expires_at', windowEnd.toISOString())
     .is('expiry_reminded_at', null);
 
-  if (error) throw new Error('Expiring accounts could not be read.');
+  if (error) throw new ServerError('Expiring accounts could not be read.');
   const rows = due ?? [];
   if (!rows.length) return { checked: 0, sent: 0 };
 
@@ -304,15 +332,19 @@ async function sendExpiryReminders(supabase: SupabaseClient) {
 
 export async function GET(request: Request): Promise<Response> {
   try {
+    // Fail closed: without a configured secret nobody may run the job.
     const secret = process.env.CRON_SECRET;
-    if (secret && request.headers.get('authorization') !== `Bearer ${secret}`) {
+    const given = Buffer.from(request.headers.get('authorization') ?? '', 'utf8');
+    const expected = Buffer.from(`Bearer ${secret ?? ''}`, 'utf8');
+    if (!secret || given.length !== expected.length || !timingSafeEqual(given, expected)) {
+      if (!secret) console.error('[cron] CRON_SECRET is not set; refusing to run.');
       return fail('Unauthorized.', 401);
     }
 
     const supabase = adminClient();
     // ?digest=force sends the digest on any day (for testing); it still
     // respects opt-outs and the once-a-week guard.
-    const force = Boolean(secret) && new URL(request.url).searchParams.get('digest') === 'force';
+    const force = new URL(request.url).searchParams.get('digest') === 'force';
     const expiry = await sendExpiryReminders(supabase);
     let digest: unknown;
     try {
@@ -324,6 +356,6 @@ export async function GET(request: Request): Promise<Response> {
     }
     return json({ expiry, digest });
   } catch (error) {
-    return fail(safeMessage(error), 500);
+    return fail(safeMessage(error), statusFor(error, 500));
   }
 }

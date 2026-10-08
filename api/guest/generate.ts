@@ -7,7 +7,7 @@ import OpenAI from 'openai';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -44,11 +44,35 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  if (!(error instanceof Error)) return true;
+  if (error instanceof ServerError) return true;
+  // Plain Error and the custom classes in this file carry user-facing messages.
+  // Built-in errors (TypeError, SyntaxError, AbortError, ...) are bugs or outages.
+  return error.constructor !== Error && Object.getPrototypeOf(error.constructor) !== Error;
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -94,7 +118,7 @@ function openai() {
 //   80% to 100% -> cheaper model only
 //   over 100%   -> free and guest calls pause until midnight WAT; paid calls
 //                  continue on the cheaper model
-// Reading the spend fails open: a telemetry hiccup must never block users.
+// Reading the spend fails closed for free and guest use (see spendLevel).
 
 class SpendPausedError extends Error {}
 class UpstreamError extends Error {}
@@ -111,8 +135,10 @@ function dailyTokenBudget(): number {
 async function spendLevel(supabase: SupabaseClient): Promise<SpendLevel> {
   const { data, error } = await supabase.rpc('ai_tokens_today');
   if (error) {
-    console.error('[spend] could not read today\'s spend', error.message);
-    return 'normal';
+    // Fail closed: if spend can't be read, treat today as over budget. Free and
+    // guest AI pauses; paid members continue on the lighter model.
+    console.error('[spend] could not read today\'s spend; pausing free AI', error.message);
+    return 'paused';
   }
   const used = Number(data ?? 0);
   const budget = dailyTokenBudget();
@@ -348,8 +374,12 @@ Create a title, the complete prompt, a concise explanation of why it works, and 
  * The raw IP never touches the database.
  */
 function guestFingerprint(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for') ?? '';
-  const ip = forwarded.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
+  // Vercel sets x-vercel-forwarded-for / x-real-ip itself from the connection,
+  // so a visitor can't spoof them to reset their free preview.
+  const ip = (request.headers.get('x-vercel-forwarded-for') ?? '').split(',')[0]?.trim()
+    || request.headers.get('x-real-ip')?.trim()
+    || (request.headers.get('x-forwarded-for') ?? '').split(',').pop()?.trim()
+    || 'unknown';
   return createHash('sha256').update(`${env.guestIpSalt}:${ip}`).digest('hex');
 }
 
@@ -357,7 +387,7 @@ class GuestQuotaError extends Error {}
 
 async function consumeGuestQuota(supabase: SupabaseClient, ipHash: string) {
   const { data, error } = await supabase.rpc('consume_guest_quota', { p_ip_hash: ipHash });
-  if (error) throw new Error('Usage could not be checked.');
+  if (error) throw new ServerError('Usage could not be checked.');
   const result = data as { allowed: boolean; remaining: number; limit: number };
   if (!result.allowed) {
     throw new GuestQuotaError('You have used your free preview. Sign in with Google to keep building — it is still free.');
@@ -448,6 +478,6 @@ export async function POST(request: Request): Promise<Response> {
       await refundGuestQuota(supabase, fingerprint);
     }
     const status = error instanceof GuestQuotaError ? 429 : error instanceof SpendPausedError ? 503 : error instanceof UpstreamError ? 502 : 400;
-    return fail(safeMessage(error), status);
+    return fail(safeMessage(error), statusFor(error, status));
   }
 }

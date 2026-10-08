@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -41,11 +41,35 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  if (!(error instanceof Error)) return true;
+  if (error instanceof ServerError) return true;
+  // Plain Error and the custom classes in this file carry user-facing messages.
+  // Built-in errors (TypeError, SyntaxError, AbortError, ...) are bugs or outages.
+  return error.constructor !== Error && Object.getPrototypeOf(error.constructor) !== Error;
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -104,7 +128,7 @@ export async function GET(request: Request): Promise<Response> {
         p_user_id: user.id,
         p_display_name: fallbackName,
       });
-      if (healError || !healed) throw new Error('Your profile could not be loaded.');
+      if (healError || !healed) throw new ServerError('Your profile could not be loaded.');
       profile = healed;
     }
     const expired = profile.plan !== 'free' && (!profile.plan_expires_at || new Date(profile.plan_expires_at) <= new Date());
@@ -156,6 +180,6 @@ export async function GET(request: Request): Promise<Response> {
       history: historyResult.data ?? [],
     });
   } catch (error) {
-    return fail(safeMessage(error), error instanceof AuthError ? 401 : 500);
+    return fail(safeMessage(error), statusFor(error, error instanceof AuthError ? 401 : 500));
   }
 }
