@@ -55,11 +55,12 @@ async function readJson<T>(request: Request): Promise<T> {
 class ServerError extends Error {}
 
 function isInternal(error: unknown): boolean {
-  if (!(error instanceof Error)) return true;
-  if (error instanceof ServerError) return true;
-  // Plain Error and the custom classes in this file carry user-facing messages.
-  // Built-in errors (TypeError, SyntaxError, AbortError, ...) are bugs or outages.
-  return error.constructor !== Error && Object.getPrototypeOf(error.constructor) !== Error;
+  // Only a plain Error or one of this file's own classes carries a message
+  // written for users. Everything else (TypeError, SyntaxError, AbortError,
+  // library errors) is a bug or an outage and must not leak its text.
+  if (!(error instanceof Error) || error instanceof ServerError) return true;
+  if (Object.getPrototypeOf(error) === Error.prototype) return false;
+  return ![AuthError].some((kind) => error instanceof kind);
 }
 
 function safeMessage(error: unknown): string {
