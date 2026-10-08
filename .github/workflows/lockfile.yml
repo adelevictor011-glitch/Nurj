@@ -21,8 +21,20 @@ jobs:
           node-version: 22
       - name: Resolve exact versions (no install scripts run)
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Check for known critical vulnerabilities
-        run: npm audit --package-lock-only --audit-level=critical || echo "::warning::npm audit reported critical issues"
+      - name: Report known vulnerabilities
+        run: |
+          npm audit --package-lock-only --json > audit.json || true
+          node -e '
+            const r = require("./audit.json");
+            const v = Object.values(r.vulnerabilities || {});
+            for (const x of v) {
+              const via = x.via.map(i => typeof i === "string" ? i : `${i.title} (${i.url})`).join("; ");
+              const fix = x.fixAvailable === true ? "fix: npm audit fix" : x.fixAvailable ? `fix: ${x.fixAvailable.name}@${x.fixAvailable.version}${x.fixAvailable.isSemVerMajor ? " (major)" : ""}` : "no fix";
+              console.log(`::warning::${x.severity.toUpperCase()} ${x.name} ${x.range} direct=${x.isDirect} | ${via} | ${fix}`);
+            }
+            console.log(`::notice::audit summary ${JSON.stringify(r.metadata?.vulnerabilities || {})}`);
+          '
+          rm -f audit.json
       - name: Commit lockfile
         run: |
           if git diff --quiet -- package-lock.json && git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
