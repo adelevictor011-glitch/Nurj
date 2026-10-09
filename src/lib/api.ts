@@ -7,20 +7,44 @@ async function accessToken(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
-async function request<T>(path: string, init: RequestInit = {}, anonymous = false): Promise<T> {
-  const token = anonymous ? null : await accessToken();
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.headers ?? {}),
-    },
-  });
+// AI calls can take a while; anything slower than this is treated as stuck so
+// buttons never spin forever.
+const REQUEST_TIMEOUT_MS = 75_000;
 
-  const payload = (await response.json().catch(() => ({}))) as { error?: string } & T;
-  if (!response.ok) throw new Error(payload.error || 'The request could not be completed.');
-  return payload;
+async function request<T>(path: string, init: RequestInit = {}, anonymous = false): Promise<T> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new Error('You are offline. Check your connection and try again.');
+  }
+  const token = anonymous ? null : await accessToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    clearTimeout(timer);
+    if (controller.signal.aborted) throw new Error('This is taking longer than usual. Please try again.');
+    throw new Error('Could not reach Nurj. Check your connection and try again.', { cause: error });
+  }
+
+  try {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string } & T;
+    if (!response.ok) {
+      if (response.status === 504 || response.status === 502) throw new Error('This is taking longer than usual. Please try again.');
+      throw new Error(payload.error || 'The request could not be completed.');
+    }
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface SectorInsights {
