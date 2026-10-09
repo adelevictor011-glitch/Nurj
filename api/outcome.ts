@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -41,11 +41,36 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  // Only a plain Error or one of this file's own classes carries a message
+  // written for users. Everything else (TypeError, SyntaxError, AbortError,
+  // library errors) is a bug or an outage and must not leak its text.
+  if (!(error instanceof Error) || error instanceof ServerError) return true;
+  if (Object.getPrototypeOf(error) === Error.prototype) return false;
+  return ![AuthError].some((kind) => error instanceof kind);
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -78,6 +103,15 @@ async function requireUser(request: Request) {
 
 class AuthError extends Error {}
 
+// Only link records the signed-in user owns. A reference to anyone else's
+// row (or a malformed one) is dropped, never trusted.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function ownedId(supabase: SupabaseClient, table: 'prompt_history' | 'prompt_runs', id: string, userId: string): Promise<string | null> {
+  if (!id || !UUID.test(id)) return null;
+  const { data } = await supabase.from(table).select('id').eq('id', id).eq('user_id', userId).maybeSingle();
+  return data?.id ?? null;
+}
+
 // ---- endpoint ----
 
 /**
@@ -94,6 +128,12 @@ export async function POST(request: Request): Promise<Response> {
     const historyId = assertText(body.historyId, 'History reference', 60, false);
     const note = assertText(body.note, 'Note', 600, false);
 
+    const [ownedRun, ownedHistory] = await Promise.all([
+      ownedId(supabase, 'prompt_runs', runId, user.id),
+      ownedId(supabase, 'prompt_history', historyId, user.id),
+    ]);
+    if (runId && !ownedRun) throw new Error('That run was not found.');
+
     const { data: profile } = await supabase
       .from('profiles')
       .select('business_category, stage')
@@ -103,8 +143,8 @@ export async function POST(request: Request): Promise<Response> {
     const { error } = await supabase.from('outcomes').upsert(
       {
         user_id: user.id,
-        run_id: runId || null,
-        history_id: historyId || null,
+        run_id: ownedRun,
+        history_id: ownedHistory,
         worked: body.worked,
         note: note || null,
         business_category: profile?.business_category ?? null,
@@ -112,10 +152,10 @@ export async function POST(request: Request): Promise<Response> {
       },
       { onConflict: 'user_id,run_id' },
     );
-    if (error) throw new Error('Your feedback could not be saved.');
+    if (error) throw new ServerError('Your feedback could not be saved.');
 
     return json({ recorded: true });
   } catch (error) {
-    return fail(safeMessage(error), error instanceof AuthError ? 401 : 400);
+    return fail(safeMessage(error), statusFor(error, error instanceof AuthError ? 401 : 400));
   }
 }

@@ -7,7 +7,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -43,11 +43,36 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  // Only a plain Error or one of this file's own classes carries a message
+  // written for users. Everything else (TypeError, SyntaxError, AbortError,
+  // library errors) is a bug or an outage and must not leak its text.
+  if (!(error instanceof Error) || error instanceof ServerError) return true;
+  if (Object.getPrototypeOf(error) === Error.prototype) return false;
+  return ![AuthError].some((kind) => error instanceof kind);
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -164,7 +189,7 @@ export async function POST(request: Request): Promise<Response> {
       currency: 'NGN',
       status: 'initialized',
     });
-    if (error) throw new Error('The payment record could not be created.');
+    if (error) throw new ServerError('The payment record could not be created.');
 
     const transaction = await initializeTransaction({
       email: user.email,
@@ -177,6 +202,6 @@ export async function POST(request: Request): Promise<Response> {
 
     return json({ authorization_url: transaction.authorization_url, reference: transaction.reference });
   } catch (error) {
-    return fail(safeMessage(error), error instanceof AuthError ? 401 : 400);
+    return fail(safeMessage(error), statusFor(error, error instanceof AuthError ? 401 : 400));
   }
 }
