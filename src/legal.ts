@@ -7,7 +7,7 @@
 // are asked to accept the new version once.
 
 export const LEGAL_VERSION = '2026-10-04';
-export const LEGAL_UPDATED = '4 October 2026';
+export const LEGAL_UPDATED = '8 October 2026';
 
 // TODO(founder): confirm these mailboxes exist before merging.
 export const SUPPORT_EMAIL = 'support@nurjai.com';
@@ -62,7 +62,7 @@ export const LEGAL_DOCUMENTS: Record<LegalKey, LegalDocument> = {
       ] },
       { heading: '7. Our property', body: ['The Nurj software, design, guides, templates and brand belong to Made by Youni Ltd. These Terms do not transfer ownership of them to you.'] },
       { heading: '8. Third-party services', body: [
-        'Nurj relies on Google (sign-in), Supabase (database), Vercel (hosting), Groq (AI processing), Paystack (payments) and Resend (email). Their terms may also apply, and we are not responsible for their outages.',
+        'Nurj relies on Google (sign-in), Supabase (database), Vercel (hosting), Groq (AI processing), Paystack (payments) and Brevo (email). Their terms may also apply, and we are not responsible for their outages.',
       ] },
       { heading: '9. Plans, payments and refunds', body: [
         'Paid plans are bought through Paystack at the prices shown in the app. Each payment gives 30 days of access and does not renew automatically.',
@@ -107,7 +107,7 @@ export const LEGAL_DOCUMENTS: Record<LegalKey, LegalDocument> = {
         'Your prompt inputs and outputs are sent to Groq, our AI provider, to produce results. Only submit what you are comfortable having processed this way, and do not submit other people\'s personal data without a lawful basis.',
       ] },
       { heading: '4. Who we share with', body: [
-        'We do not sell personal data. We share it only with providers who run Nurj for us: Supabase (database and sign-in), Vercel (hosting), Groq (AI), Paystack (payments), Resend (email) and Google (sign-in). We may disclose data where the law requires.',
+        'We do not sell personal data. We share it only with providers who run Nurj for us: Supabase (database and sign-in), Vercel (hosting), Groq (AI), Paystack (payments), Brevo (email) and Google (sign-in). We may disclose data where the law requires.',
       ] },
       { heading: '5. International transfers', body: ['Some providers process data outside Nigeria, for example in the US or EU. We rely on the transfer safeguards the NDPA allows.'] },
       { heading: '6. How long we keep it', body: [

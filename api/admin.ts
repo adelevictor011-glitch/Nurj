@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -41,11 +41,36 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  // Only a plain Error or one of this file's own classes carries a message
+  // written for users. Everything else (TypeError, SyntaxError, AbortError,
+  // library errors) is a bug or an outage and must not leak its text.
+  if (!(error instanceof Error) || error instanceof ServerError) return true;
+  if (Object.getPrototypeOf(error) === Error.prototype) return false;
+  return ![AuthError, ForbiddenError].some((kind) => error instanceof kind);
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -110,11 +135,11 @@ export async function GET(request: Request): Promise<Response> {
       supabase.rpc('admin_insight_progress', { p_min: 30 }),
     ]);
     if (overview.error || wrap.error) {
-      throw new Error('Admin data could not be loaded. Check that migrations 006 to 008 have been run.');
+      throw new ServerError('Admin data could not be loaded. Check that migrations 006 to 008 have been run.');
     }
     return json({ overview: overview.data, wrap: wrap.data ?? [], grants: grants.data ?? [], features: features.error ? null : features.data, insights: insights.error ? null : insights.data });
   } catch (error) {
-    return fail(safeMessage(error), errorStatus(error));
+    return fail(safeMessage(error), statusFor(error, errorStatus(error)));
   }
 }
 
@@ -138,6 +163,6 @@ export async function POST(request: Request): Promise<Response> {
     if (error) throw new Error(error.message);
     return json(data);
   } catch (error) {
-    return fail(safeMessage(error), errorStatus(error));
+    return fail(safeMessage(error), statusFor(error, errorStatus(error)));
   }
 }

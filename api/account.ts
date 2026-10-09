@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing server environment variable: ${name}`);
+  if (!value) throw new ServerError(`Nurj is not fully set up yet (${name}). Please try again later.`);
   return value;
 }
 
@@ -42,11 +42,36 @@ function fail(message: string, status = 400): Response {
 async function readJson<T>(request: Request): Promise<T> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) throw new Error('Expected application/json.');
-  return (await request.json()) as T;
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new Error('The request body must be valid JSON.');
+  }
+}
+
+// Server-side failures (database down, missing config, bugs). Their message,
+// if any, is written for users; anything unexpected gets a generic one.
+class ServerError extends Error {}
+
+function isInternal(error: unknown): boolean {
+  // Only a plain Error or one of this file's own classes carries a message
+  // written for users. Everything else (TypeError, SyntaxError, AbortError,
+  // library errors) is a bug or an outage and must not leak its text.
+  if (!(error instanceof Error) || error instanceof ServerError) return true;
+  if (Object.getPrototypeOf(error) === Error.prototype) return false;
+  return ![AuthError].some((kind) => error instanceof kind);
 }
 
 function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected server error.';
+  if (isInternal(error)) {
+    console.error('[server] internal error', error);
+    return error instanceof ServerError && error.message ? error.message : 'Something went wrong on our side. Please try again.';
+  }
+  return (error as Error).message;
+}
+
+function statusFor(error: unknown, status: number): number {
+  return isInternal(error) ? 500 : status;
 }
 
 function assertText(value: unknown, label: string, maxLength: number, required = true): string {
@@ -207,8 +232,12 @@ async function notifyAdmin(subject: string, text: string) {
 
 // One-click unsubscribe for the Monday digest (feature 6). The token is an
 // HMAC of the user id, so links cannot be forged for other accounts.
+// Signed with a key derived from the service-role secret (always set, never
+// shared with guest-IP hashing). Throws if it is missing, so links can't be
+// signed with an empty key.
 function digestToken(userId: string): string {
-  return createHmac('sha256', `digest:${process.env.GUEST_IP_SALT ?? ''}`).update(userId).digest('hex').slice(0, 32);
+  const key = createHmac('sha256', env.supabaseServiceRoleKey).update('nurj:digest-unsubscribe:v2').digest();
+  return createHmac('sha256', key).update(userId).digest('hex').slice(0, 32);
 }
 
 async function unsubscribe(token: string): Promise<Response> {
@@ -218,7 +247,13 @@ async function unsubscribe(token: string): Promise<Response> {
       status,
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
     });
-  if (!userId || !signature || signature !== digestToken(userId)) return page('That unsubscribe link is not valid.', 400);
+  const valid = (() => {
+    if (!userId || !signature || !/^[0-9a-f-]{36}$/i.test(userId)) return false;
+    const a = Buffer.from(signature, 'utf8');
+    const b = Buffer.from(digestToken(userId), 'utf8');
+    return a.length === b.length && timingSafeEqual(a, b);
+  })();
+  if (!valid) return page('That unsubscribe link is not valid.', 400);
   const { error } = await adminClient().from('profiles').update({ digest_opt_out: true }).eq('id', userId);
   if (error) return page('Something went wrong. Please try again.', 500);
   return page('You will no longer get the Monday digest.');
@@ -236,7 +271,7 @@ export async function GET(request: Request): Promise<Response> {
         : { eligible: false, reason: refund.reason },
     });
   } catch (error) {
-    return fail(safeMessage(error), error instanceof AuthError ? 401 : 500);
+    return fail(safeMessage(error), statusFor(error, error instanceof AuthError ? 401 : 500));
   }
 }
 
@@ -267,13 +302,13 @@ export async function POST(request: Request): Promise<Response> {
         .eq('id', user.id);
       if (error) {
         console.error('[account] consent save failed', error.code, error.message);
-        throw new Error('Your agreement could not be saved. Please try again.');
+        throw new ServerError('Your agreement could not be saved. Please try again.');
       }
       return json({ terms_version: version, terms_accepted_at: acceptedAt });
     }
 
     if (action === 'export') {
-      const tables = ['prompt_history', 'prompt_runs', 'outcomes', 'saved_snippets', 'action_progress', 'payments', 'refund_requests'] as const;
+      const tables = ['businesses', 'business_addons', 'prompt_history', 'prompt_runs', 'outcomes', 'saved_prompts', 'saved_snippets', 'wins', 'action_progress', 'payments', 'refund_requests'] as const;
       const [profile, ...rows] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
         ...tables.map((table) => supabase.from(table).select('*').eq('user_id', user.id)),
@@ -307,7 +342,7 @@ export async function POST(request: Request): Promise<Response> {
         const { error: archiveError } = await supabase
           .from('payment_archive')
           .upsert(payments, { onConflict: 'reference', ignoreDuplicates: true });
-        if (archiveError) throw new Error('Your account could not be deleted. Please try again.');
+        if (archiveError) throw new ServerError('Your account could not be deleted. Please try again.');
       }
       // Strip the two places personal text outlives the account. Everything
       // else cascades from auth.users, or keeps anonymised rows (model_usage,
@@ -316,7 +351,7 @@ export async function POST(request: Request): Promise<Response> {
       await supabase.from('refund_requests').update({ reason: null }).eq('user_id', user.id);
       await supabase.from('admin_grants').update({ target_email: 'deleted account' }).eq('target_user', user.id);
       const { error } = await supabase.auth.admin.deleteUser(user.id);
-      if (error) throw new Error('Your account could not be deleted. Please try again.');
+      if (error) throw new ServerError('Your account could not be deleted. Please try again.');
       return json({ deleted: true });
     }
 
@@ -351,7 +386,7 @@ export async function POST(request: Request): Promise<Response> {
         const { error: slotError } = await supabase.from('business_addons').delete().eq('payment_reference', payment.reference);
         if (slotError) {
           await supabase.from('refund_requests').delete().eq('id', claim.id);
-          throw new Error('Your refund could not be started. Please try again.');
+          throw new ServerError('Your refund could not be started. Please try again.');
         }
         await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
       }
@@ -389,7 +424,7 @@ export async function POST(request: Request): Promise<Response> {
             .eq('id', user.id);
       if (planError) {
         await supabase.from('refund_requests').delete().eq('id', claim.id);
-        throw new Error('Your refund could not be started. Please try again.');
+        throw new ServerError('Your refund could not be started. Please try again.');
       }
       if (!isAddon) await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
 
@@ -411,6 +446,6 @@ export async function POST(request: Request): Promise<Response> {
 
     throw new Error('Unknown action.');
   } catch (error) {
-    return fail(safeMessage(error), error instanceof AuthError ? 401 : 400);
+    return fail(safeMessage(error), statusFor(error, error instanceof AuthError ? 401 : 400));
   }
 }
