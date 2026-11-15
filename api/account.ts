@@ -224,6 +224,22 @@ async function sendEmail(message: { to: string; subject: string; text: string; h
   }
 }
 
+// Welcome email, sent the moment a new user accepts the terms (their first real step in Nurj).
+// Uses the same Brevo/Resend sender as the Monday digest; silently skipped if email isn't configured.
+async function sendWelcome(email: string, meta: Record<string, unknown> | undefined) {
+  const raw = (typeof meta?.full_name === 'string' && meta.full_name) || (typeof meta?.name === 'string' && meta.name) || '';
+  const first = raw.trim().split(/\s+/)[0] || 'there';
+  try {
+    await sendEmail({
+      to: email,
+      subject: 'Welcome to Nurj — your first move',
+      text: `Hi ${first},\n\nWelcome to Nurj. You're in.\n\nThe fastest way to get value today:\n\n1. Add your business (what you sell and who buys it).\n2. Pick the stage you're at: validating, launching, scaling or planning your exit.\n3. Ask Nurj for your first move. It writes the exact prompt and the next steps in under a minute.\n\nStuck or unsure where to start? Open the guide library inside Nurj, or just reply to this email.\n\nStart here: ${env.appUrl}\n\n— Zee, founder of Nurj`,
+    });
+  } catch (error) {
+    console.error('[account] welcome email failed', error instanceof Error ? error.message : error);
+  }
+}
+
 async function notifyAdmin(subject: string, text: string) {
   const to = process.env.ADMIN_ALERT_EMAIL;
   console.warn('[account]', subject, text);
@@ -296,6 +312,9 @@ export async function POST(request: Request): Promise<Response> {
       const version = assertText(body.version, 'Version', 20);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(version)) throw new Error('Invalid terms version.');
       const acceptedAt = new Date().toISOString();
+      // First-ever acceptance = a brand-new user. Re-accepting a newer terms version does not count.
+      const { data: before } = await supabase.from('profiles').select('terms_accepted_at').eq('id', user.id).maybeSingle();
+      const isNewUser = !before?.terms_accepted_at;
       const { error } = await supabase
         .from('profiles')
         .update({ terms_version: version, terms_accepted_at: acceptedAt, updated_at: acceptedAt })
@@ -304,6 +323,7 @@ export async function POST(request: Request): Promise<Response> {
         console.error('[account] consent save failed', error.code, error.message);
         throw new ServerError('Your agreement could not be saved. Please try again.');
       }
+      if (isNewUser && user.email) await sendWelcome(user.email, user.user_metadata);
       return json({ terms_version: version, terms_accepted_at: acceptedAt });
     }
 
