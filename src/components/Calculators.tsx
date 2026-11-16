@@ -6,18 +6,8 @@ import {
   type PaymentMethod,
 } from '../lib/calcMaths';
 
-const naira = (value: number) => `₦${Math.round(value).toLocaleString('en-NG')}`;
-const percent = (value: number) => `${Math.round(value)}%`;
-
-function Field({ label, value, onChange, hint, suffix }: { label: string; value: string; onChange: (value: string) => void; hint?: string; suffix?: string }) {
-  return (
-    <label className="calc-field">
-      <span>{label}{suffix ? ` (${suffix})` : ''}</span>
-      <input className="field" inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} />
-      {hint && <small>{hint}</small>}
-    </label>
-  );
-}
+import { Field, naira, percent } from './calcUi';
+import * as More from './calculatorsMore';
 
 function Runway() {
   const [cash, setCash] = useState('450000');
@@ -326,17 +316,42 @@ type CalcProps = { ask: (label: string, action: () => void) => void; authenticat
 interface CalcEntry { id: string; name: string; question: string; group: string; render: (props: CalcProps) => ReactNode }
 
 /** Add a calculator here and it appears in its group, searchable. */
+const CASH = 'Cash and survival';
+const PRICING = 'Pricing and profit';
+const GROWTH = 'Growth';
+const LEAVING = 'Leaving your 9–5';
+
 const CALCULATORS: CalcEntry[] = [
-  { id: 'runway', name: 'Runway', question: 'How long can the business keep going?', group: 'Cash and survival', render: () => <Runway /> },
-  { id: 'burn-rate', name: 'Burn rate', question: 'What does the business cost to run each month?', group: 'Cash and survival', render: () => <BurnRate /> },
-  { id: 'break-even', name: 'Break-even', question: 'How many sales before I stop losing money?', group: 'Cash and survival', render: () => <BreakEven /> },
-  { id: 'profit-per-order', name: 'True profit per order', question: "What's left after cost, delivery and payment fees?", group: 'Pricing and profit', render: () => <ProfitPerOrder /> },
-  { id: 'hourly-rate', name: 'Hourly rate', question: 'What must I charge to earn my monthly goal?', group: 'Pricing and profit', render: () => <HourlyRate /> },
-  { id: 'retainer', name: 'Retainer maths', question: 'How many monthly clients do you need?', group: 'Pricing and profit', render: () => <Retainer /> },
-  { id: 'price-rise', name: 'Price rise', question: 'Can you raise prices without losing money?', group: 'Pricing and profit', render: (props) => <PriceRise {...props} /> },
-  { id: 'discount', name: 'Discount impact', question: 'How many extra sales does a promo need to be worth it?', group: 'Pricing and profit', render: () => <DiscountImpact /> },
-  { id: 'payback', name: 'Customer payback', question: 'How long before a paid-for customer earns back what they cost?', group: 'Growth', render: () => <CustomerPayback /> },
-  { id: 'quit-number', name: 'Quit-the-9–5 number', question: 'What monthly profit safely replaces my salary?', group: 'Leaving your 9–5', render: () => <QuitNumber /> },
+  { id: 'runway', name: 'Runway', question: 'How long can the business keep going?', group: CASH, render: () => <Runway /> },
+  { id: 'burn-rate', name: 'Burn rate', question: 'What does the business cost to run each month?', group: CASH, render: () => <BurnRate /> },
+  { id: 'break-even', name: 'Break-even', question: 'How many sales before I stop losing money?', group: CASH, render: () => <BreakEven /> },
+  { id: 'late-float', name: 'Late-payer float', question: 'If clients pay late, how much cash must I carry?', group: CASH, render: () => <More.LateFloat /> },
+  { id: 'loan-cost', name: 'Real cost of a loan', question: 'What does this loan or pay-later deal really cost?', group: CASH, render: () => <More.LoanCost /> },
+  { id: 'savings-target', name: 'Savings target', question: 'How much a week to reach my target by a date?', group: CASH, render: () => <More.SavingsTarget /> },
+  { id: 'ajo', name: 'Ajo / esusu planner', question: 'When do I collect, and does the payout cover what I need?', group: CASH, render: () => <More.Ajo /> },
+  { id: 'tax-set-aside', name: 'Tax set-aside', question: 'How much of my side hustle profit should I keep for tax?', group: CASH, render: () => <More.TaxSetAside /> },
+  { id: 'reorder-point', name: 'Stock reorder point', question: 'When should I restock so I never run out?', group: CASH, render: () => <More.ReorderPoint /> },
+  { id: 'profit-per-order', name: 'True profit per order', question: "What's left after cost, delivery and payment fees?", group: PRICING, render: () => <ProfitPerOrder /> },
+  { id: 'hourly-rate', name: 'Hourly rate', question: 'What must I charge to earn my monthly goal?', group: PRICING, render: () => <HourlyRate /> },
+  { id: 'retainer', name: 'Retainer maths', question: 'How many monthly clients do you need?', group: PRICING, render: () => <Retainer /> },
+  { id: 'price-rise', name: 'Price rise', question: 'Can you raise prices without losing money?', group: PRICING, render: (props) => <PriceRise {...props} /> },
+  { id: 'discount', name: 'Discount impact', question: 'How many extra sales does a promo need to be worth it?', group: PRICING, render: () => <DiscountImpact /> },
+  { id: 'markup-margin', name: 'Markup and margin', question: 'What markup gives me the margin I want?', group: PRICING, render: () => <More.MarkupMargin /> },
+  { id: 'price-after-fees', name: 'Price after fees', question: 'What do I charge to receive an exact amount after Paystack?', group: PRICING, render: () => <More.PriceAfterFees /> },
+  { id: 'inflation-price', name: 'Inflation price update', question: 'What should my price be now that costs went up?', group: PRICING, render: () => <More.InflationPrice /> },
+  { id: 'dollar-impact', name: 'Dollar-rate impact', question: 'How does the exchange rate change my stock cost?', group: PRICING, render: () => <More.DollarImpact /> },
+  { id: 'bundle', name: 'Bundle pricing', question: 'Does a bundle earn more than selling items separately?', group: PRICING, render: () => <More.Bundle /> },
+  { id: 'free-delivery', name: 'Free-delivery threshold', question: 'What order size makes free delivery worth it?', group: PRICING, render: () => <More.FreeDelivery /> },
+  { id: 'wholesale', name: 'Wholesale price', question: 'What can I sell to resellers for and still profit?', group: PRICING, render: () => <More.Wholesale /> },
+  { id: 'payment-methods', name: 'POS vs transfer vs cash', question: 'Which way of getting paid costs me least?', group: PRICING, render: () => <More.PaymentMethods /> },
+  { id: 'maker-rate', name: 'Maker hourly earnings', question: 'What do I really earn per hour on each item I make?', group: PRICING, render: () => <More.MakerRate /> },
+  { id: 'payback', name: 'Customer payback', question: 'How long before a paid-for customer earns back what they cost?', group: GROWTH, render: () => <CustomerPayback /> },
+  { id: 'enquiries', name: 'Enquiries needed', question: 'How many DMs or enquiries hit my sales target?', group: GROWTH, render: () => <More.EnquiriesNeeded /> },
+  { id: 'lifetime-value', name: 'Customer lifetime value', question: 'What is a repeat customer worth to me?', group: GROWTH, render: () => <More.LifetimeValue /> },
+  { id: 'influencer', name: 'Influencer deal', question: "Is this influencer's fee worth it?", group: GROWTH, render: () => <More.InfluencerDeal /> },
+  { id: 'first-hire', name: 'First hire', question: 'Can I afford my first helper?', group: GROWTH, render: () => <More.FirstHire /> },
+  { id: 'space-vs-home', name: 'Shop space vs home', question: 'Does renting a shop or office pay for itself?', group: GROWTH, render: () => <More.SpaceVsHome /> },
+  { id: 'quit-number', name: 'Quit-the-9–5 number', question: 'What monthly profit safely replaces my salary?', group: LEAVING, render: () => <QuitNumber /> },
 ];
 
 function CalcRow({ entry, props }: { entry: CalcEntry; props: CalcProps }) {
