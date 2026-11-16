@@ -684,19 +684,19 @@ function Landing({
               </div>
               <div className="mini-dashboard">
                 <div className="mini-head">
-                  <div><small>MONDAY SIGNAL</small><h3>One move. Done properly.</h3></div>
+                  <div><small>Monday signal</small><h3>One move. Done properly.</h3></div>
                   <div className="score-ring">38</div>
                 </div>
                 <div className="command-card-preview">
-                  <div className="preview-label"><Zap size={13} /> HIGHEST-LEVERAGE MOVE</div>
+                  <div className="preview-label"><Zap size={13} /> Highest-leverage move</div>
                   <h4>Send five specific outreach messages.</h4>
                   <p>Not more content. Not a new logo. Start five buyer conversations.</p>
                   <button>Generate execution prompt <ArrowRight size={14} /></button>
                 </div>
                 <div className="mini-grid">
-                  <div><small>STAGE</small><strong>Launch</strong><span>2 of 4</span></div>
-                  <div><small>FOCUS</small><strong>Pipeline</strong><span>5 outreaches</span></div>
-                  <div><small>MOMENTUM</small><strong>+12%</strong><span>This week</span></div>
+                  <div><small>Stage</small><strong>Launch</strong><span>2 of 4</span></div>
+                  <div><small>Focus</small><strong>Pipeline</strong><span>5 outreaches</span></div>
+                  <div><small>Momentum</small><strong>+12%</strong><span>This week</span></div>
                 </div>
                 <div className="prompt-stream">
                   <span className="ai-symbol"><Sparkles size={15} /></span>
@@ -831,7 +831,7 @@ function ResultScreen({ stageKey, onContinue }: { stageKey: StageKey; onContinue
     <main className="focus-shell result-shell">
       <div className="focus-top"><Brand /><span>Signal acquired</span></div>
       <section className="result-card">
-        <div className="stage-orbit"><div><span>STAGE {stage.number}</span><strong>{stage.label}</strong></div></div>
+        <div className="stage-orbit"><div><span>Stage {stage.number}</span><strong>{stage.label}</strong></div></div>
         <div className="result-copy">
           <span className="eyebrow">{stage.eyebrow}</span>
           <h1>Your business is in its <em>{stage.label}</em> era.</h1>
@@ -892,7 +892,7 @@ function WorkspaceShell({
         </nav>
         <div className="sidebar-stage">
           <div className="stage-mini-orbit">{STAGES[profile.stage ?? 'launch'].number}</div>
-          {!compact && <div><small>CURRENT STAGE</small><strong>{STAGES[profile.stage ?? 'launch'].label}</strong></div>}
+          {!compact && <div><small>Current stage</small><strong>{STAGES[profile.stage ?? 'launch'].label}</strong></div>}
         </div>
         <div className="sidebar-bottom">
           {isAdmin && <button className={screen === 'admin' ? 'active' : ''} onClick={() => { setScreen('admin'); setMobileMenu(false); }}><BarChart3 size={19} /><span>Admin</span></button>}
@@ -1002,15 +1002,15 @@ function Dashboard({
   return (
     <div className="screen-stack">
       <section className="screen-heading dashboard-heading">
-        <div><span className="eyebrow">COMMAND CENTRE</span><h1>Good morning, {firstName}.</h1><p>Protect the move that creates the next commercial signal.</p></div>
-        <div className="date-chip"><span>WEEK 01</span><strong>Momentum cycle</strong></div>
+        <div><span className="eyebrow">Command centre</span><h1>Good morning, {firstName}.</h1><p>Protect the move that creates the next commercial signal.</p></div>
+        <div className="date-chip"><span>Week 01</span><strong>Momentum cycle</strong></div>
       </section>
 
       <PlanExpiryNotice plan={profile.plan} expiresAt={profile.plan_expires_at} onUpgrade={() => onNavigate('upgrade')} />
 
       <section className="dashboard-command-grid">
         <article className="primary-command-card">
-          <div className="command-topline"><span><Zap size={14} /> HIGHEST-LEVERAGE MOVE</span><small>Today</small></div>
+          <div className="command-topline"><span><Zap size={14} /> Highest-leverage move</span><small>Today</small></div>
           <h2>{stage.firstMove}</h2>
           <p>{stage.signal}</p>
           <div className="command-actions">
@@ -1022,7 +1022,7 @@ function Dashboard({
           <div className="momentum-orbit" style={{ '--score': `${profile.momentum_score * 3.6}deg` } as React.CSSProperties}>
             <div><strong>{profile.momentum_score}</strong><span>momentum</span></div>
           </div>
-          <div><span className="eyebrow">WEEKLY SIGNAL</span><h3>{profile.momentum_score < 40 ? 'Build the rhythm' : 'Momentum is forming'}</h3><p>Complete focused actions to strengthen the signal.</p></div>
+          <div><span className="eyebrow">Weekly signal</span><h3>{profile.momentum_score < 40 ? 'Build the rhythm' : 'Momentum is forming'}</h3><p>Complete focused actions to strengthen the signal.</p></div>
         </article>
       </section>
 
@@ -1035,7 +1035,7 @@ function Dashboard({
 
       <section className="dashboard-lower-grid">
         <article className="panel action-panel">
-          <div className="panel-title"><div><span className="eyebrow">THIS WEEK</span><h3>Three moves, in order.</h3></div><span>{completed.length}/3 done</span></div>
+          <div className="panel-title"><div><span className="eyebrow">This week</span><h3>Three moves, in order.</h3></div><span>{completed.length}/3 done</span></div>
           <div className="action-list">
             {stage.actions.map((action, index) => (
               <button className={completed.includes(index) ? 'done' : ''} onClick={() => toggleAction(index)} key={action}>
@@ -1047,7 +1047,7 @@ function Dashboard({
           </div>
         </article>
         <article className="panel recent-panel">
-          <div className="panel-title"><div><span className="eyebrow">RECENT INTELLIGENCE</span><h3>Your latest work</h3></div><button onClick={() => onNavigate('history')}>View all</button></div>
+          <div className="panel-title"><div><span className="eyebrow">Recent intelligence</span><h3>Your latest work</h3></div><button onClick={() => onNavigate('history')}>View all</button></div>
           {history.length ? (
             <div className="recent-list">
               {history.slice(0, 3).map((item) => (
@@ -1229,7 +1229,7 @@ function PromptStudio({
     <div className="screen-stack studio-screen">
       {modal}
       <section className="screen-heading">
-        <div><span className="eyebrow">PROMPT STUDIO</span><h1>Turn context into execution.</h1><p>Nurj architects the instruction. Your AI produces the work.</p></div>
+        <div><span className="eyebrow">Prompt studio</span><h1>Turn context into execution.</h1><p>Nurj architects the instruction. Your AI produces the work.</p></div>
         <UsagePill used={usage.prompt.used} limit={usage.prompt.limit} label="prompts today" />
       </section>
       <div className="studio-layout">
@@ -1248,7 +1248,7 @@ function PromptStudio({
         <main className="studio-canvas panel">
           {step === 1 && (
             <div>
-              <div className="canvas-heading"><span>STEP 01</span><h2>What must move next?</h2><p>Choose one outcome. Precision begins with a single job.</p></div>
+              <div className="canvas-heading"><span>Step 01</span><h2>What must move next?</h2><p>Choose one outcome. Precision begins with a single job.</p></div>
               <div className="goal-grid">
                 {GOALS.map((goalItem) => {
                   const Icon = ICONS[goalItem.icon] ?? Sparkles;
@@ -1269,7 +1269,7 @@ function PromptStudio({
 
           {step === 2 && (
             <form onSubmit={generate}>
-              <div className="canvas-heading"><span>STEP 02</span><h2>Make the intelligence yours.</h2><p>Two required details separate a generic template from a commercial tool.</p></div>
+              <div className="canvas-heading"><span>Step 02</span><h2>Make the intelligence yours.</h2><p>Two required details separate a generic template from a commercial tool.</p></div>
               <div className="form-grid">
                 <label className="full"><span>Your business <b>required</b></span><input className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-person brand identity studio for Nigerian fashion businesses" /><small>{business ? `Detected intelligence segment: ${classifyBusiness(business).replaceAll('_', ' ')}` : 'Describe the business in one clear sentence.'}</small></label>
                 <label className="full"><span>Target customer <b>required</b></span><input className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="Founder-led fashion brands in Lagos selling through Instagram" /></label>
@@ -1311,11 +1311,11 @@ function PromptStudio({
 
           {step === 3 && (
             <div className="result-output">
-              <div className="canvas-heading"><span>STEP 03</span><h2>{busy ? 'Architecting the prompt…' : result?.title ?? 'Your prompt'}</h2><p>{busy ? 'Structuring role, context, format and constraints.' : 'Ready to copy into ChatGPT or another capable AI.'}</p></div>
+              <div className="canvas-heading"><span>Step 03</span><h2>{busy ? 'Architecting the prompt…' : result?.title ?? 'Your prompt'}</h2><p>{busy ? 'Structuring role, context, format and constraints.' : 'Ready to copy into ChatGPT or another capable AI.'}</p></div>
               {busy ? <IntelligenceLoader /> : result && (
                 <>
-                  <div className="prompt-output-box"><div className="output-toolbar"><span><Sparkles size={14} /> NURJ PROMPT</span><CopyButton text={result.prompt} notify={notify} /></div><pre>{result.prompt}</pre></div>
-                  <div className="output-insight-grid"><div><span>WHY IT WORKS</span><p>{result.why_it_works}</p></div><div><span>NEXT ACTION</span><p>{result.next_action}</p></div></div>
+                  <div className="prompt-output-box"><div className="output-toolbar"><span><Sparkles size={14} /> Nurj prompt</span><CopyButton text={result.prompt} notify={notify} /></div><pre>{result.prompt}</pre></div>
+                  <div className="output-insight-grid"><div><span>Why it works</span><p>{result.why_it_works}</p></div><div><span>Next action</span><p>{result.next_action}</p></div></div>
                   {authenticated && <RunPanel prompt={result.prompt} historyId={historyId} userId={userId} businessId={profile.active_business_id} ask={ask} notify={notify} onUsage={(remaining) => onUsage({ ...usage, prompt: { ...usage.prompt, used: usage.prompt.used + 1, remaining } })} />}
                   <div className="canvas-footer"><button className="button button-ghost" onClick={reset}>Build another</button><SaveToLibrary prompt={result.prompt} defaultTitle={result.title} source="generated" userId={userId} businessId={profile.active_business_id} notify={notify} /><ShareButton text={result.prompt} title={result.title} /><CopyButton text={result.prompt} notify={notify} primary /></div>
                 </>
@@ -1384,10 +1384,10 @@ function Enhancer({
 
   return (
     <div className="screen-stack">
-      <section className="screen-heading"><div><span className="eyebrow">PROMPT ENHANCER</span><h1>Weak in. Precise out.</h1><p>See what the prompt is missing, then rebuild it around the result you need.</p></div><UsagePill used={usage.enhance.used} limit={usage.enhance.limit} label="enhancements" /></section>
+      <section className="screen-heading"><div><span className="eyebrow">Prompt enhancer</span><h1>Weak in. Precise out.</h1><p>See what the prompt is missing, then rebuild it around the result you need.</p></div><UsagePill used={usage.enhance.used} limit={usage.enhance.limit} label="enhancements" /></section>
       <section className="enhancer-grid">
         <article className="panel enhancer-input">
-          <div className="panel-title"><div><span className="eyebrow">ORIGINAL</span><h3>Paste the prompt as it is.</h3></div><Clipboard size={18} /></div>
+          <div className="panel-title"><div><span className="eyebrow">Original</span><h3>Paste the prompt as it is.</h3></div><Clipboard size={18} /></div>
           <textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder="e.g. Write a caption for my business…" />
           {wall && (
             <UpgradeWall
@@ -1401,11 +1401,11 @@ function Enhancer({
           <div className="enhancer-controls"><span>{input.length} characters</span><button className="button button-primary" disabled={!input.trim() || busy} onClick={enhance}>{overLimit ? 'Upgrade to continue' : busy ? 'Rebuilding…' : 'Enhance prompt'} <Sparkles size={16} /></button></div>
         </article>
         <article className="panel enhancer-output">
-          <div className="panel-title"><div><span className="eyebrow">REBUILT</span><h3>{result?.title ?? 'The stronger version appears here.'}</h3></div>{result && <CopyButton text={result.enhanced_prompt} notify={notify} />}</div>
+          <div className="panel-title"><div><span className="eyebrow">Rebuilt</span><h3>{result?.title ?? 'The stronger version appears here.'}</h3></div>{result && <CopyButton text={result.enhanced_prompt} notify={notify} />}</div>
           {busy ? <IntelligenceLoader /> : result ? (
             <>
               <pre>{result.enhanced_prompt}</pre>
-              <div className="diagnosis"><span>DIAGNOSIS</span><p>{result.diagnosis}</p></div>
+              <div className="diagnosis"><span>Diagnosis</span><p>{result.diagnosis}</p></div>
               <div className="change-list">{result.changes.map((change) => <span key={change}><Check size={13} /> {change}</span>)}</div>
               <div className="canvas-footer"><span /><SaveToLibrary prompt={result.enhanced_prompt} defaultTitle={result.title} source="enhanced" userId={userId} businessId={profile.active_business_id} notify={notify} /></div>
             </>
@@ -1422,7 +1422,7 @@ function Guides({ stageKey, plan, onUpgrade }: { stageKey: StageKey; plan: PlanK
   const [reading, setReading] = useState<GuideItem | null>(null);
   return (
     <div className="screen-stack">
-      <section className="screen-heading"><div><span className="eyebrow">STAGE PLAYBOOKS</span><h1>Learn at the speed of the constraint.</h1><p>No giant course library. Only the knowledge required for the next stage.</p></div><div className="plan-chip"><BookOpen size={15} /> {plan === 'free' ? 'Free library' : 'Full library'}</div></section>
+      <section className="screen-heading"><div><span className="eyebrow">Stage playbooks</span><h1>Learn at the speed of the constraint.</h1><p>No giant course library. Only the knowledge required for the next stage.</p></div><div className="plan-chip"><BookOpen size={15} /> {plan === 'free' ? 'Free library' : 'Full library'}</div></section>
       <div className="stage-tabs">{Object.values(STAGES).map((item) => <button className={activeStage === item.key ? 'active' : ''} onClick={() => { setActiveStage(item.key); setOpen(0); }} key={item.key}><span>0{item.number}</span>{item.label}</button>)}</div>
       <section className="guide-layout">
         <article className="guide-stage-card"><span>{STAGES[activeStage].eyebrow}</span><h2>{STAGES[activeStage].label}</h2><p>{STAGES[activeStage].description}</p><blockquote>{STAGES[activeStage].signal}</blockquote></article>
@@ -1454,7 +1454,7 @@ function GuideReader({ item, onClose }: { item: GuideItem; onClose: () => void }
       >
         <header>
           <div>
-            <span className="eyebrow">PLAYBOOK · {item.minutes} MIN</span>
+            <span className="eyebrow">Playbook · {item.minutes} min</span>
             <h2>{item.title}</h2>
             <p>{item.description}</p>
           </div>
@@ -1501,7 +1501,7 @@ function HistoryScreen({ history, notify }: { history: PromptHistoryItem[]; noti
   const items = history.filter((item) => filter === 'all' || item.kind === filter);
   return (
     <div className="screen-stack">
-      <section className="screen-heading"><div><span className="eyebrow">INTELLIGENCE HISTORY</span><h1>Your work should compound.</h1><p>Reuse, adapt and learn from the prompts that moved the business.</p></div><div className="filter-buttons">{(['all', 'generated', 'enhanced'] as const).map((value) => <button className={filter === value ? 'active' : ''} onClick={() => setFilter(value)} key={value}>{value}</button>)}</div></section>
+      <section className="screen-heading"><div><span className="eyebrow">Intelligence history</span><h1>Your work should compound.</h1><p>Reuse, adapt and learn from the prompts that moved the business.</p></div><div className="filter-buttons">{(['all', 'generated', 'enhanced'] as const).map((value) => <button className={filter === value ? 'active' : ''} onClick={() => setFilter(value)} key={value}>{value}</button>)}</div></section>
       {items.length ? <div className="history-grid">{items.map((item) => { const prompt = String(item.output.prompt ?? item.output.enhanced_prompt ?? ''); return <article className="panel history-card" key={item.id}><div><span>{item.kind === 'generated' ? <WandSparkles size={15} /> : <BrainCircuit size={15} />}{item.kind}</span><small>{new Date(item.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}</small></div><h3>{item.title}</h3><p>{prompt.slice(0, 190)}{prompt.length > 190 ? '…' : ''}</p><button onClick={() => { void navigator.clipboard.writeText(prompt); notify('Copied from history.'); }}><Copy size={14} /> Copy prompt</button></article>; })}</div> : <div className="empty-state large panel"><History size={34} /><strong>No saved intelligence yet.</strong><p>Your authenticated generations will be saved here automatically.</p></div>}
     </div>
   );
@@ -1650,10 +1650,10 @@ function Account({
 
   return (
     <div className="screen-stack account-screen">
-      <section className="screen-heading"><div><span className="eyebrow">WORKSPACE SETTINGS</span><h1>Keep Nurj close to the business.</h1><p>Your saved context makes every future prompt faster and more specific.</p></div></section>
+      <section className="screen-heading"><div><span className="eyebrow">Workspace settings</span><h1>Keep Nurj close to the business.</h1><p>Your saved context makes every future prompt faster and more specific.</p></div></section>
       <section className="account-grid">
         <form className="panel account-form" onSubmit={save}>
-          <div className="panel-title"><div><span className="eyebrow">BUSINESS PROFILE</span><h3>Core context</h3></div><Settings2 size={18} /></div>
+          <div className="panel-title"><div><span className="eyebrow">Business profile</span><h3>Core context</h3></div><Settings2 size={18} /></div>
           {editing ? (
             <>
               <label><span>Your name</span><input className="field" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label>
@@ -1685,10 +1685,10 @@ function Account({
           )}
         </form>
         <div className="account-side">
-          <article className="panel plan-card"><span className="eyebrow">CURRENT PLAN</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><RoiLine userId={user?.id ?? null} plan={profile.plan === 'free' ? 'builder' : profile.plan} /><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
+          <article className="panel plan-card"><span className="eyebrow">Current plan</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><RoiLine userId={user?.id ?? null} plan={profile.plan === 'free' ? 'builder' : profile.plan} /><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
           <Businesses profile={profile} userId={user?.id ?? null} notify={notify} onSwitched={onSwitched} onBuySlot={onBuySlot} buying={buyingSlot} />
           <article className="panel data-card">
-            <span className="eyebrow">PREFERENCES</span>
+            <span className="eyebrow">Preferences</span>
             {user && (
               <label className="consent-check">
                 <input type="checkbox" checked={!profile.digest_opt_out} onChange={async (event) => {
@@ -1709,7 +1709,7 @@ function Account({
           </article>
           {refund?.eligible && (
             <article className="panel data-card">
-              <span className="eyebrow">7-DAY GUARANTEE</span>
+              <span className="eyebrow">7-day guarantee</span>
               <h3>Not working for you?</h3>
               <p>You can get a full refund of ₦{(refund.amount / 100).toLocaleString('en-NG')} until {new Date(refund.deadline).toLocaleDateString('en-NG', { day: 'numeric', month: 'long' })}. Once per account. <a href="/refunds" target="_blank" rel="noopener">Refund policy</a></p>
               {refundOpen ? (
@@ -1727,7 +1727,7 @@ function Account({
           )}
           {user && (
             <article className="panel data-card">
-              <span className="eyebrow">YOUR DATA</span>
+              <span className="eyebrow">Your data</span>
               <h3>Download or delete</h3>
               <p>Get a copy of everything Nurj holds about you, or delete your account and data for good. Payment records are kept without your name for tax.</p>
               <div className="account-actions">
@@ -1771,7 +1771,7 @@ function Upgrade({
   return (
     <main className="focus-shell upgrade-shell">
       <div className="focus-top"><Brand /><button className="button button-ghost button-small" onClick={onBack}><ArrowLeft size={15} /> Back</button></div>
-      <section className="upgrade-heading"><span className="eyebrow">NURJ ACCESS</span><h1>More movement. Less friction.</h1><p>Choose the level that matches how often Nurj needs to work alongside the business.</p></section>
+      <section className="upgrade-heading"><span className="eyebrow">Nurj access</span><h1>More movement. Less friction.</h1><p>Choose the level that matches how often Nurj needs to work alongside the business.</p></section>
       <section className="pricing-grid">
         <PlanCard name="Free" price="₦0" description="Test the operating system and build a daily execution habit." features={['5 prompt architectures daily', '3 prompt enhancements daily', 'Free stage playbooks', 'Local guest exploration']} active={currentPlan === 'free'} />
         <PlanCard name="Builder" price="₦10,000" suffix="30 days" description="For a founder actively building pipeline, offers and content." features={['Unlimited prompt architectures and enhancements*', '10 prompt runs a day', '200 saved prompts', '1 business (add more for ₦5,000 each)']} featured active={currentPlan === 'builder'} busy={busy === 'builder'} onChoose={() => onChoose('builder')} />
@@ -1804,7 +1804,7 @@ function PlanCard({
   busy?: boolean;
   onChoose?: () => void;
 }) {
-  return <article className={`pricing-card ${featured ? 'featured' : ''}`}>{featured && <span className="popular-badge">MOST USEFUL</span>}<div><span>{name}</span>{active && <small>Current</small>}</div><h2>{price}</h2>{suffix && <b>/ {suffix}</b>}<p>{description}</p><ul>{features.map((feature) => <li key={feature}><Check size={14} /> {feature}</li>)}</ul>{onChoose && <button className={`button ${featured ? 'button-primary' : 'button-secondary'}`} disabled={busy || active} onClick={onChoose}>{active ? 'Current plan' : busy ? 'Opening Paystack…' : `Choose ${name}`}<ArrowRight size={15} /></button>}</article>;
+  return <article className={`pricing-card ${featured ? 'featured' : ''}`}>{featured && <span className="popular-badge">Most useful</span>}<div><span>{name}</span>{active && <small>Current</small>}</div><h2>{price}</h2>{suffix && <b>/ {suffix}</b>}<p>{description}</p><ul>{features.map((feature) => <li key={feature}><Check size={14} /> {feature}</li>)}</ul>{onChoose && <button className={`button ${featured ? 'button-primary' : 'button-secondary'}`} disabled={busy || active} onClick={onChoose}>{active ? 'Current plan' : busy ? 'Opening Paystack…' : `Choose ${name}`}<ArrowRight size={15} /></button>}</article>;
 }
 
 function UsagePill({ used, limit, label }: { used: number; limit: number | null; label: string }) {
@@ -1909,7 +1909,7 @@ function RunPanel({
 
   return (
     <div className="run-output">
-      <div className="output-toolbar"><span><Rocket size={14} /> RESULT</span><CopyButton text={output} notify={notify} /></div>
+      <div className="output-toolbar"><span><Rocket size={14} /> Result</span><CopyButton text={output} notify={notify} /></div>
       <pre>{output}</pre>
       <ChannelPanel text={output} title="Nurj result" authenticated={Boolean(userId)} ask={ask} onRemaining={onUsage} notify={notify} />
       {answered === null && (
@@ -1930,7 +1930,7 @@ function RunPanel({
       )}
       {fixed && (
         <div className="fix-result">
-          <div className="output-toolbar"><span><Sparkles size={14} /> FIXED PROMPT</span><CopyButton text={fixed.enhanced_prompt} notify={notify} /></div>
+          <div className="output-toolbar"><span><Sparkles size={14} /> Fixed prompt</span><CopyButton text={fixed.enhanced_prompt} notify={notify} /></div>
           <p className="fix-diagnosis">{fixed.diagnosis}</p>
           <pre>{fixed.enhanced_prompt}</pre>
           <div className="change-list">{fixed.changes.map((change) => <span key={change}><Check size={13} /> {change}</span>)}</div>

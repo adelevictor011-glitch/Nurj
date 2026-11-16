@@ -54,7 +54,7 @@ export function ConsentGate({ onAccept, onSignOut }: { onAccept: () => Promise<v
   return (
     <div className="consent-gate" role="dialog" aria-modal="true" aria-labelledby="consent-title">
       <div className="panel consent-card">
-        <span className="eyebrow">BEFORE YOU CONTINUE</span>
+        <span className="eyebrow">Before you continue</span>
         <h2 id="consent-title">Our Terms and Privacy Policy</h2>
         <p>They explain what Nurj does with your data, your 7-day refund, and how to download or delete everything. Please read and accept them to keep using Nurj.</p>
         <ConsentCheckbox checked={agreed} onChange={setAgreed} />

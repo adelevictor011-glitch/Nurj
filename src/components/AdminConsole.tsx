@@ -96,7 +96,7 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
   return (
     <div className="screen-stack admin-screen">
       <section className="screen-heading">
-        <div><span className="eyebrow">ADMIN CONSOLE</span><h1>Is Nurj working?</h1><p>WRAP is the gate: no new growth features while it sits below 30%.</p></div>
+        <div><span className="eyebrow">Admin console</span><h1>Is Nurj working?</h1><p>WRAP is the gate: no new growth features while it sits below 30%.</p></div>
         <button className="button button-ghost button-small" onClick={() => void load()}>Refresh</button>
       </section>
 
@@ -111,7 +111,7 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
 
       {data.insights && (
         <section className="panel">
-          <div className="panel-title"><div><span className="eyebrow">BATCH 5 · SECTOR INSIGHTS</span><h3>Progress to the 30-report threshold</h3></div><span>Insights switch on by themselves</span></div>
+          <div className="panel-title"><div><span className="eyebrow">Batch 5 · sector insights</span><h3>Progress to the 30-report threshold</h3></div><span>Insights switch on by themselves</span></div>
           {data.insights.length ? (
             <table className="admin-table">
               <thead><tr><th>Sector</th><th>Reports (6 months)</th><th>Best goal</th><th>Live goals</th></tr></thead>
@@ -125,7 +125,7 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
 
       {data.features && (
         <section className="panel">
-          <div className="panel-title"><div><span className="eyebrow">FEATURE USE</span><h3>Batches 2 to 4</h3></div>
+          <div className="panel-title"><div><span className="eyebrow">Feature use</span><h3>Batches 2 to 4</h3></div>
             {data.features.payments_needing_refund > 0 && <span className="admin-alert">{data.features.payments_needing_refund} payment{data.features.payments_needing_refund === 1 ? '' : 's'} to refund in Paystack</span>}
           </div>
           <table className="admin-table"><tbody>
@@ -139,19 +139,19 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
       )}
 
       <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">RETENTION</span><h3>WRAP by week</h3></div><span>Faded bar = this week, still in progress</span></div>
+        <div className="panel-title"><div><span className="eyebrow">Retention</span><h3>WRAP by week</h3></div><span>Faded bar = this week, still in progress</span></div>
         <WrapChart weeks={data.wrap} />
       </section>
 
       <section className="admin-grid">
         <article className="panel">
-          <div className="panel-title"><div><span className="eyebrow">WHO SIGNS UP</span><h3>Business categories</h3></div></div>
+          <div className="panel-title"><div><span className="eyebrow">Who signs up</span><h3>Business categories</h3></div></div>
           <table className="admin-table"><tbody>{o.categories.map((row) => <tr key={row.name}><td>{row.name.replaceAll('_', ' ')}</td><td>{number(row.count)}</td></tr>)}</tbody></table>
           <h3 className="admin-sub">Stages</h3>
           <table className="admin-table"><tbody>{o.stages.map((row) => <tr key={row.name}><td>{row.name}</td><td>{number(row.count)}</td></tr>)}</tbody></table>
         </article>
         <article className="panel">
-          <div className="panel-title"><div><span className="eyebrow">WHAT THEY ASK FOR</span><h3>Goals, last 30 days</h3></div><span>{goalTotal ? `${Math.round((customTotal / goalTotal) * 100)}% custom` : ''}</span></div>
+          <div className="panel-title"><div><span className="eyebrow">What they ask for</span><h3>Goals, last 30 days</h3></div><span>{goalTotal ? `${Math.round((customTotal / goalTotal) * 100)}% custom` : ''}</span></div>
           <table className="admin-table"><tbody>{o.goals_30d.slice(0, 15).map((row) => (
             <tr key={row.goal}><td>{row.goal}{!standard.has(row.goal) && <em> custom</em>}</td><td>{number(row.count)}</td></tr>
           ))}</tbody></table>
@@ -160,14 +160,14 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
 
       <section className="admin-grid">
         <article className="panel">
-          <div className="panel-title"><div><span className="eyebrow">MARGIN WATCH</span><h3>Heaviest AI users, 30 days</h3></div></div>
+          <div className="panel-title"><div><span className="eyebrow">Margin watch</span><h3>Heaviest AI users, 30 days</h3></div></div>
           <table className="admin-table">
             <thead><tr><th>Email</th><th>Plan</th><th>Calls</th><th>Tokens</th></tr></thead>
             <tbody>{o.top_ai_users_30d.map((row) => <tr key={row.email}><td>{row.email}</td><td>{row.plan}</td><td>{number(row.calls)}</td><td>{number(row.tokens)}</td></tr>)}</tbody>
           </table>
         </article>
         <article className="panel">
-          <div className="panel-title"><div><span className="eyebrow">MANUAL ACCESS</span><h3>Grant a plan</h3></div></div>
+          <div className="panel-title"><div><span className="eyebrow">Manual access</span><h3>Grant a plan</h3></div></div>
           <form className="admin-grant" onSubmit={submitGrant}>
             <label><span>Account email</span><input className="field" type="email" required value={grant.email} onChange={(event) => setGrant({ ...grant, email: event.target.value })} /></label>
             <div className="admin-grant-row">

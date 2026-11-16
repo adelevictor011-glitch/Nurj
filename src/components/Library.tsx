@@ -31,7 +31,7 @@ function OperatorPack({ profile, userId, notify, onUpgrade }: { profile: UserPro
   if (!operator) {
     return (
       <article className="panel pack-card locked">
-        <span className="eyebrow">OPERATOR MONTHLY PACK</span>
+        <span className="eyebrow">Operator monthly pack</span>
         <h3>Six fresh prompts for your sector, every month.</h3>
         <p>Operator members get a pack written for their business sector and stage, plus unlimited daily runs and up to 3 businesses.</p>
         <button className="button button-secondary button-small" onClick={onUpgrade}>See Operator</button>
@@ -41,7 +41,7 @@ function OperatorPack({ profile, userId, notify, onUpgrade }: { profile: UserPro
 
   return (
     <article className="panel pack-card">
-      <div className="panel-title"><div><span className="eyebrow">OPERATOR MONTHLY PACK</span><h3>{pack?.title ?? 'This month’s prompts for your sector'}</h3></div>
+      <div className="panel-title"><div><span className="eyebrow">Operator monthly pack</span><h3>{pack?.title ?? 'This month’s prompts for your sector'}</h3></div>
         <button onClick={() => setOpen((value) => !value)}>{open ? 'Hide' : 'Open pack'}</button></div>
       {open && !pack && !error && <p className="muted-line">Preparing this month's pack…</p>}
       {error && <p className="muted-line">{error}</p>}
@@ -132,7 +132,7 @@ export function Library({
   if (!userId) {
     return (
       <div className="screen-stack">
-        <section className="screen-heading"><div><span className="eyebrow">PROMPT LIBRARY</span><h1>Keep the prompts that work.</h1><p>Sign in to save prompts, tag them and run them again.</p></div></section>
+        <section className="screen-heading"><div><span className="eyebrow">Prompt library</span><h1>Keep the prompts that work.</h1><p>Sign in to save prompts, tag them and run them again.</p></div></section>
       </div>
     );
   }
@@ -140,7 +140,7 @@ export function Library({
   return (
     <div className="screen-stack library-screen">
       <section className="screen-heading">
-        <div><span className="eyebrow">PROMPT LIBRARY</span><h1>Keep the prompts that work.</h1><p>Copying and searching are free. Running or improving a prompt counts toward your daily usage.</p></div>
+        <div><span className="eyebrow">Prompt library</span><h1>Keep the prompts that work.</h1><p>Copying and searching are free. Running or improving a prompt counts toward your daily usage.</p></div>
         <div className="usage-pill"><span>{items.length}/{limit ?? '∞'}</span><div><strong>saved prompts</strong><small>{limit === null ? 'No limit on Operator' : `${Math.max(0, limit - items.length)} left on your plan`}</small></div></div>
       </section>
 

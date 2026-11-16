@@ -96,7 +96,7 @@ export function Businesses({
 
   return (
     <article className="panel businesses-card">
-      <div className="panel-title"><div><span className="eyebrow">YOUR BUSINESSES</span><h3>{items.length} of {allowance} in use</h3></div></div>
+      <div className="panel-title"><div><span className="eyebrow">Your businesses</span><h3>{items.length} of {allowance} in use</h3></div></div>
       <p className="muted-line">Each business keeps its own details, saved prompts and wins. Daily AI usage is shared across all of them.</p>
       <ul className="business-list">
         {items.map((business, index) => {

@@ -17,7 +17,7 @@ export function SectorInsightsCard({ insights, onUseGoal }: { insights: SectorIn
   return (
     <article className="panel insights-panel">
       <div className="panel-title">
-        <div><span className="eyebrow">WHAT'S WORKING IN {sector.toUpperCase()}</span><h3>{live.length ? 'Moves other founders say worked' : 'Sector insights are warming up'}</h3></div>
+        <div><span className="eyebrow">What's working in {sector.toUpperCase()}</span><h3>{live.length ? 'Moves other founders say worked' : 'Sector insights are warming up'}</h3></div>
         {insights.sector_worked_pct !== null && <span>{insights.sector_worked_pct}% of reported runs worked</span>}
       </div>
       {live.length ? (
