@@ -211,7 +211,7 @@ function ProfitPerOrder() {
       </div>
       <div className="calc-result">
         <strong className={result.profit <= 0 ? 'calc-warn' : undefined}>{result.profit <= 0 ? `You lose ${naira(-result.profit)} on every order` : `${naira(result.profit)} profit per order`}</strong>
-        <span>{percent(result.margin * 100)} margin. Payment fee {naira(result.fee)}, total costs {naira(result.costs)}.</span>
+        <span>{result.profit <= 0 ? `Costs come to ${naira(result.costs)} against a ${naira(n(price))} price, including a ${naira(result.fee)} payment fee.` : `${percent(result.margin * 100)} margin. Payment fee ${naira(result.fee)}, total costs ${naira(result.costs)}.`}</span>
       </div>
     </div>
   );
@@ -357,7 +357,7 @@ export function Calculators(props: CalcProps) {
   const groups = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const matches = CALCULATORS.filter((entry) => {
-      const text = `${entry.name} ${entry.question} ${entry.group}`.toLowerCase();
+      const text = `${entry.name} ${entry.question}`.toLowerCase();
       return words.every((word) => text.includes(word));
     });
     const byGroup = new Map<string, CalcEntry[]>();
