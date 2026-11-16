@@ -25,7 +25,7 @@ function Runway() {
   const months = burn > 0 ? n(cash) / burn : Infinity;
   return (
     <article className="panel calc-card">
-      <span className="eyebrow">RUNWAY</span>
+      <span className="eyebrow">Runway</span>
       <h3>How long can the business keep going?</h3>
       <p className="calc-explain">Like fuel in a generator: cash in the bank is the fuel, and what you spend each month after sales is how fast it burns.</p>
       <div className="calc-grid">
@@ -53,7 +53,7 @@ function BurnRate() {
   const total = lines.reduce((sum, line) => sum + n(line.amount), 0);
   return (
     <article className="panel calc-card">
-      <span className="eyebrow">BURN RATE</span>
+      <span className="eyebrow">Burn rate</span>
       <h3>What does the business cost to run each month?</h3>
       <p className="calc-explain">Add every monthly cost, even small ones. Data, fuel and delivery add up faster than rent.</p>
       <div className="burn-lines">
@@ -79,7 +79,7 @@ function Retainer() {
   const clients = retainer > 0 ? Math.ceil(n(target) / retainer) : 0;
   return (
     <article className="panel calc-card">
-      <span className="eyebrow">RETAINER MATHS</span>
+      <span className="eyebrow">Retainer maths</span>
       <h3>How many monthly clients do you need?</h3>
       <p className="calc-explain">A retainer is a fixed monthly fee for agreed work, like a monthly maintenance contract instead of one-off repairs.</p>
       <div className="calc-grid">
@@ -127,7 +127,7 @@ function PriceRise({ ask, authenticated, notify, onRemaining }: { ask: (label: s
 
   return (
     <article className="panel calc-card">
-      <span className="eyebrow">PRICE RISE</span>
+      <span className="eyebrow">Price rise</span>
       <h3>Can you raise prices without losing money?</h3>
       <p className="calc-explain">If a few customers leave after a price rise, you can still earn the same or more. This shows how many you can afford to lose.</p>
       <div className="calc-grid">
@@ -168,7 +168,7 @@ function PriceRise({ ask, authenticated, notify, onRemaining }: { ask: (label: s
 export function Calculators({ ask, authenticated, notify, onRemaining }: { ask: (label: string, action: () => void) => void; authenticated: boolean; notify: (message: string) => void; onRemaining: (remaining: number | null) => void }) {
   return (
     <div className="screen-stack calc-screen">
-      <section className="screen-heading"><div><span className="eyebrow">NAIRA CALCULATORS</span><h1>Do the sums before the move.</h1><p>These work offline and never count toward your daily usage. Only the customer message uses AI.</p></div></section>
+      <section className="screen-heading"><div><span className="eyebrow">Naira calculators</span><h1>Do the sums before the move.</h1><p>These work offline and never count toward your daily usage. Only the customer message uses AI.</p></div></section>
       <section className="calc-layout">
         <Runway />
         <BurnRate />

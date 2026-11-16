@@ -78,7 +78,7 @@ export function WinLog({ userId, businessId, plan, notify }: { userId: string | 
 
   return (
     <article className="panel win-log">
-      <div className="panel-title"><div><span className="eyebrow">WIN LOG</span><h3>{formatNaira(total)} logged</h3></div><span>{formatNaira(thisWeek)} in the last 7 days</span></div>
+      <div className="panel-title"><div><span className="eyebrow">Win log</span><h3>{formatNaira(total)} logged</h3></div><span>{formatNaira(thisWeek)} in the last 7 days</span></div>
       <form className="win-form" onSubmit={add}>
         <input className="field" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="₦ amount" aria-label="Amount in naira" />
         <input className="field" value={note} maxLength={200} onChange={(event) => setNote(event.target.value)} placeholder="Landed a ₦90,000 client, sold 14 units…" aria-label="What happened" />
