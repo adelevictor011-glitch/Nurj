@@ -21,7 +21,7 @@ const env = {
   get openaiModel() { return process.env.OPENAI_MODEL || 'openai/gpt-oss-120b'; },
   get openaiFallbackModel() { return process.env.OPENAI_MODEL_FALLBACK || 'openai/gpt-oss-20b'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
-  get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
+  get appUrl() { return (process.env.APP_URL || 'https://nurjai.com').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.
   get guestIpSalt() { return required('GUEST_IP_SALT'); },
 };

@@ -20,7 +20,7 @@ const env = {
   get openaiBaseUrl() { return process.env.OPENAI_BASE_URL || undefined; },
   get openaiModel() { return process.env.OPENAI_MODEL || 'openai/gpt-oss-120b'; },
   get paystackSecretKey() { return required('PAYSTACK_SECRET_KEY'); },
-  get appUrl() { return (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''); },
+  get appUrl() { return (process.env.APP_URL || 'https://nurjai.com').replace(/\/$/, ''); },
   // Salt for hashing guest IP addresses. Never store a raw IP.
   get guestIpSalt() { return required('GUEST_IP_SALT'); },
 };
