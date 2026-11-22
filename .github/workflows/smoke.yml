@@ -1,0 +1,50 @@
+name: Smoke test
+
+# Checks the LIVE site after every production deploy and every morning (07:13 Lagos).
+# If anything fails it opens a GitHub issue labelled smoke-alert (GitHub emails you),
+# adds a comment while it stays broken, and closes it when everything passes again.
+on:
+  deployment_status:
+  schedule:
+    - cron: "13 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  smoke:
+    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Wait for the new deploy to reach the domain
+        if: github.event_name == 'deployment_status'
+        run: sleep 45
+      - name: Run smoke test
+        id: smoke
+        continue-on-error: true
+        run: python3 scripts/smoke.py https://nurjai.com
+      - name: Open or update the alert issue
+        if: steps.smoke.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create smoke-alert --color B60205 --description "Live site check failed" 2>/dev/null || true
+          RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          { echo "The live site check failed ($(date -u +'%Y-%m-%d %H:%M UTC'), trigger: ${{ github.event_name }})."; echo; cat smoke-report.md; echo; echo "Run: $RUN"; } > body.md
+          N=$(gh issue list --label smoke-alert --state open --json number --jq '.[0].number')
+          if [ -n "$N" ]; then gh issue comment "$N" --body-file body.md; else gh issue create --title "Live site check failed: Nurj" --label smoke-alert --body-file body.md; fi
+          exit 1
+      - name: Close the alert when everything passes
+        if: steps.smoke.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for N in $(gh issue list --label smoke-alert --state open --json number --jq '.[].number'); do
+            gh issue close "$N" --comment "All checks pass again."
+          done

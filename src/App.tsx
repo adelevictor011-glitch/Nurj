@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -42,18 +42,15 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { useDismiss } from './lib/useDismiss';
 import { GOALS, GUIDES, QUIZ, STAGES } from './data';
-import { GUIDE_CONTENT } from './guides-content';
 import { api, type RefundStatus, type SectorInsights } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { SavedSnippets } from './components/SavedSnippets';
-import { AdminConsole } from './components/AdminConsole';
 import { SectorInsightsCard, goalWinRate } from './components/SectorInsights';
 import { useUsageConfirm } from './components/UsageConfirm';
 import { SaveToLibrary } from './components/SaveToLibrary';
 import { ChannelPanel } from './components/ChannelPanel';
 import { Library } from './components/Library';
-import { Calculators } from './components/Calculators';
 import { WinLog, RoiLine } from './components/WinLog';
 import { Businesses } from './components/Businesses';
 import { ConsentCheckbox, ConsentGate, LegalLinks, LegalPage } from './components/Legal';
@@ -61,6 +58,7 @@ import { LEGAL_VERSION, legalFromPath } from './legal';
 import type {
   EnhanceResult,
   GenerateResult,
+  GuideBlock,
   GuideItem,
   PlanKey,
   PromptHistoryItem,
@@ -69,6 +67,15 @@ import type {
   UsageStatus,
   UserProfile,
 } from './types';
+
+// Loaded only when opened, so the first screen downloads less on mobile data.
+const Calculators = lazy(() => import('./components/Calculators').then((m) => ({ default: m.Calculators })));
+const AdminConsole = lazy(() => import('./components/AdminConsole').then((m) => ({ default: m.AdminConsole })));
+const loadGuideContent = () => import('./guides-content').then((m) => m.GUIDE_CONTENT);
+
+function ScreenLoading() {
+  return <div className="screen-loading" role="status" aria-live="polite">Loading…</div>;
+}
 
 // Paid plans stay hidden until billing launches. Set VITE_BILLING_LIVE=true in
 // Vercel (with PAYSTACK_SECRET_KEY) and redeploy to switch checkout on.
@@ -531,7 +538,7 @@ function App() {
               )}
               {screen === 'guides' && <Guides stageKey={profile.stage ?? 'launch'} plan={profile.plan} onUpgrade={() => setScreen('upgrade')} />}
               {screen === 'history' && <HistoryScreen history={history} notify={notify} />}
-              {screen === 'admin' && isAdmin && <AdminConsole notify={notify} />}
+              {screen === 'admin' && isAdmin && <Suspense fallback={<ScreenLoading />}><AdminConsole notify={notify} /></Suspense>}
               {screen === 'library' && (
                 <LibraryScreen profile={profile} usage={usage} userId={user?.id ?? null} notify={notify} onUpgrade={() => setScreen('upgrade')}
                   onUsage={(remaining) => setUsage((current) => ({ ...current, prompt: { ...current.prompt, used: current.prompt.used + 1, remaining } }))} />
@@ -1446,7 +1453,14 @@ function Guides({ stageKey, plan, onUpgrade }: { stageKey: StageKey; plan: PlanK
 }
 
 function GuideReader({ item, onClose }: { item: GuideItem; onClose: () => void }) {
-  const blocks = GUIDE_CONTENT[item.title] ?? [];
+  const [blocks, setBlocks] = useState<GuideBlock[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadGuideContent()
+      .then((content) => { if (alive) setBlocks(content[item.title] ?? []); })
+      .catch(() => { if (alive) setBlocks([]); });
+    return () => { alive = false; };
+  }, [item.title]);
   useDismiss(true, onClose);
   return (
     <motion.div className="guide-reader-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
@@ -1466,8 +1480,9 @@ function GuideReader({ item, onClose }: { item: GuideItem; onClose: () => void }
           <button className="icon-button" onClick={onClose} aria-label="Close playbook"><ArrowLeft size={18} /></button>
         </header>
         <div className="guide-reader-body">
-          {blocks.length === 0 && <p className="guide-empty">This playbook is being written. Check back shortly.</p>}
-          {blocks.map((block, index) => {
+          {blocks === null && <ScreenLoading />}
+          {blocks !== null && blocks.length === 0 && <p className="guide-empty">This playbook is being written. Check back shortly.</p>}
+          {(blocks ?? []).map((block, index) => {
             if (block.kind === 'callout') {
               return (
                 <aside className="guide-callout" key={index}>
@@ -2078,7 +2093,9 @@ function ToolsScreen({ profile, usage, authenticated, notify, onUsage }: {
   return (
     <>
       {modal}
-      <Calculators ask={ask} authenticated={authenticated} notify={notify} onRemaining={onUsage} />
+      <Suspense fallback={<ScreenLoading />}>
+        <Calculators ask={ask} authenticated={authenticated} notify={notify} onRemaining={onUsage} />
+      </Suspense>
     </>
   );
 }

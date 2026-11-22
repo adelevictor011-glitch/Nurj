@@ -105,7 +105,28 @@ class AuthError extends Error {}
 
 // ---- endpoint ----
 
+// Public setup check used by the daily smoke test (.github/workflows/smoke.yml).
+// Only says whether each setting is present: never a value. GET /api/status?health=1
+function health(): Response {
+  const has = (k: string) => Boolean(process.env[k]);
+  const appUrl = process.env.APP_URL || '';
+  const billingLive = process.env.VITE_BILLING_LIVE === 'true';
+  const checks = {
+    database: has('SUPABASE_URL') && has('SUPABASE_SERVICE_ROLE_KEY'),
+    ai: has('OPENAI_API_KEY'),
+    email: (has('BREVO_API_KEY') || has('RESEND_API_KEY')) && has('REMINDER_FROM_EMAIL'),
+    appUrl: /^https:\/\//.test(appUrl) && !/localhost/.test(appUrl),
+    cron: has('CRON_SECRET'),
+    guestSalt: has('GUEST_IP_SALT'),
+    // Billing off is fine. Billing on without the Paystack key is not.
+    billing: !billingLive || has('PAYSTACK_SECRET_KEY'),
+  };
+  const missing = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k);
+  return json({ ok: missing.length === 0, app: 'nurj', billingLive, checks, missing }, 200, { 'Cache-Control': 'no-store' });
+}
+
 export async function GET(request: Request): Promise<Response> {
+  if (new URL(request.url).searchParams.get('health') === '1') return health();
   try {
     const { user, supabase } = await requireUser(request);
     const today = new Date().toISOString().slice(0, 10);
