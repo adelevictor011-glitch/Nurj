@@ -70,6 +70,10 @@ import type {
   UserProfile,
 } from './types';
 
+// Paid plans stay hidden until billing launches. Set VITE_BILLING_LIVE=true in
+// Vercel (with PAYSTACK_SECRET_KEY) and redeploy to switch checkout on.
+const BILLING_LIVE = import.meta.env.VITE_BILLING_LIVE === 'true';
+
 const EMPTY_USAGE: UsageStatus = {
   prompt: { used: 0, limit: 5, remaining: 5 },
   enhance: { used: 0, limit: 3, remaining: 3 },
@@ -394,6 +398,7 @@ function App() {
   }
 
   async function beginPayment(plan: 'builder' | 'operator' | 'business_addon') {
+    if (!BILLING_LIVE) { notify('Paid plans open soon. Free stays free.'); return; }
     if (!user) {
       // Remember why they were signing in, so OAuth returns them to checkout
       // instead of dumping them on the dashboard with the intent lost.
@@ -1305,7 +1310,7 @@ function PromptStudio({
                   onDismiss={() => setWall('none')}
                 />
               )}
-              <div className="canvas-footer"><button type="button" className="button button-ghost" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="button button-primary" disabled={!business.trim() || !customer.trim() || busy}>{overLimit ? 'Upgrade to continue' : 'Architect my prompt'} <Sparkles size={16} /></button></div>
+              <div className="canvas-footer"><button type="button" className="button button-ghost" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="button button-primary" disabled={!business.trim() || !customer.trim() || busy}>{overLimit ? (BILLING_LIVE ? 'Upgrade to continue' : 'Daily limit reached') : 'Architect my prompt'} <Sparkles size={16} /></button></div>
             </form>
           )}
 
@@ -1398,7 +1403,7 @@ function Enhancer({
               onDismiss={() => setWall(false)}
             />
           )}
-          <div className="enhancer-controls"><span>{input.length} characters</span><button className="button button-primary" disabled={!input.trim() || busy} onClick={enhance}>{overLimit ? 'Upgrade to continue' : busy ? 'Rebuilding…' : 'Enhance prompt'} <Sparkles size={16} /></button></div>
+          <div className="enhancer-controls"><span>{input.length} characters</span><button className="button button-primary" disabled={!input.trim() || busy} onClick={enhance}>{overLimit ? (BILLING_LIVE ? 'Upgrade to continue' : 'Daily limit reached') : busy ? 'Rebuilding…' : 'Enhance prompt'} <Sparkles size={16} /></button></div>
         </article>
         <article className="panel enhancer-output">
           <div className="panel-title"><div><span className="eyebrow">Rebuilt</span><h3>{result?.title ?? 'The stronger version appears here.'}</h3></div>{result && <CopyButton text={result.enhanced_prompt} notify={notify} />}</div>
@@ -1430,7 +1435,7 @@ function Guides({ stageKey, plan, onUpgrade }: { stageKey: StageKey; plan: PlanK
           {GUIDES[activeStage].map((section, index) => (
             <article className={`guide-section panel ${open === index ? 'open' : ''}`} key={section.title}>
               <button className="guide-section-head" onClick={() => setOpen(open === index ? -1 : index)}><div><span>0{index + 1}</span><h3>{section.title}</h3><small>{section.items.length} playbooks · {section.items.filter((item) => item.free).length} free</small></div><ChevronDown size={18} /></button>
-              <AnimatePresence initial={false}>{open === index && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="guide-items">{section.items.map((item) => { const locked = !item.free && plan === 'free'; return <button className={locked ? 'locked' : ''} key={item.title} onClick={() => (locked ? onUpgrade() : setReading(item))}><span className="guide-play"><BookOpen size={15} /></span><div><strong>{item.title}</strong><p>{item.description}</p><small>{item.minutes} min read · {locked ? 'Builder' : 'Available'}</small></div><ArrowRight size={15} /></button>; })}</motion.div>}</AnimatePresence>
+              <AnimatePresence initial={false}>{open === index && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="guide-items">{section.items.map((item) => { const locked = !item.free && plan === 'free'; return <button className={locked ? 'locked' : ''} key={item.title} onClick={() => (locked ? onUpgrade() : setReading(item))}><span className="guide-play"><BookOpen size={15} /></span><div><strong>{item.title}</strong><p>{item.description}</p><small>{item.minutes} min read · {locked ? (BILLING_LIVE ? 'Builder' : 'Builder · opening soon') : 'Available'}</small></div><ArrowRight size={15} /></button>; })}</motion.div>}</AnimatePresence>
             </article>
           ))}
         </div>
@@ -1685,7 +1690,7 @@ function Account({
           )}
         </form>
         <div className="account-side">
-          <article className="panel plan-card"><span className="eyebrow">Current plan</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><RoiLine userId={user?.id ?? null} plan={profile.plan === 'free' ? 'builder' : profile.plan} /><button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button></article>
+          <article className="panel plan-card"><span className="eyebrow">Current plan</span><div><h3>{profile.plan === 'free' ? 'Free' : profile.plan === 'builder' ? 'Builder' : 'Operator'}</h3><span className="plan-live"><i /> active</span></div><p>{profile.plan === 'free' ? 'Five prompts and three enhancements each day.' : `Access active${profile.plan_expires_at ? ` until ${new Date(profile.plan_expires_at).toLocaleDateString('en-NG')}` : ''}.`}</p><RoiLine userId={user?.id ?? null} plan={profile.plan === 'free' ? 'builder' : profile.plan} />{(BILLING_LIVE || profile.plan !== 'free') && <button className="button button-secondary" onClick={onUpgrade}>{profile.plan === 'free' ? 'Explore plans' : 'Manage access'}</button>}</article>
           <Businesses profile={profile} userId={user?.id ?? null} notify={notify} onSwitched={onSwitched} onBuySlot={onBuySlot} buying={buyingSlot} />
           <article className="panel data-card">
             <span className="eyebrow">Preferences</span>
@@ -1771,14 +1776,14 @@ function Upgrade({
   return (
     <main className="focus-shell upgrade-shell">
       <div className="focus-top"><Brand /><button className="button button-ghost button-small" onClick={onBack}><ArrowLeft size={15} /> Back</button></div>
-      <section className="upgrade-heading"><span className="eyebrow">Nurj access</span><h1>More movement. Less friction.</h1><p>Choose the level that matches how often Nurj needs to work alongside the business.</p></section>
+      <section className="upgrade-heading"><span className="eyebrow">Nurj access</span><h1>More movement. Less friction.</h1><p>{BILLING_LIVE ? 'Choose the level that matches how often Nurj needs to work alongside the business.' : 'Paid plans open soon. Until then, keep building on Free; your daily limits reset every morning.'}</p></section>
       <section className="pricing-grid">
         <PlanCard name="Free" price="₦0" description="Test the operating system and build a daily execution habit." features={['5 prompt architectures daily', '3 prompt enhancements daily', 'Free stage playbooks', 'Local guest exploration']} active={currentPlan === 'free'} />
-        <PlanCard name="Builder" price="₦10,000" suffix="30 days" description="For a founder actively building pipeline, offers and content." features={['Unlimited prompt architectures and enhancements*', '10 prompt runs a day', '200 saved prompts', '1 business (add more for ₦5,000 each)']} featured active={currentPlan === 'builder'} busy={busy === 'builder'} onChoose={() => onChoose('builder')} />
-        <PlanCard name="Operator" price="₦25,000" suffix="30 days" description="For founders running more than one hustle, or running Nurj all day." features={['Everything in Builder', 'Unlimited prompt runs*', 'A monthly prompt pack for your sector', 'Unlimited saved prompts', 'Up to 3 businesses (add 2 more for ₦5,000 each)']} active={currentPlan === 'operator'} busy={busy === 'operator'} onChoose={() => onChoose('operator')} />
+        <PlanCard name="Builder" price="₦10,000" suffix="30 days" description="For a founder actively building pipeline, offers and content." features={['Unlimited prompt architectures and enhancements*', '10 prompt runs a day', '200 saved prompts', '1 business (add more for ₦5,000 each)']} featured active={currentPlan === 'builder'} busy={busy === 'builder'} onChoose={BILLING_LIVE ? () => onChoose('builder') : undefined} />
+        <PlanCard name="Operator" price="₦25,000" suffix="30 days" description="For founders running more than one hustle, or running Nurj all day." features={['Everything in Builder', 'Unlimited prompt runs*', 'A monthly prompt pack for your sector', 'Unlimited saved prompts', 'Up to 3 businesses (add 2 more for ₦5,000 each)']} active={currentPlan === 'operator'} busy={busy === 'operator'} onChoose={BILLING_LIVE ? () => onChoose('operator') : undefined} />
       </section>
       <RoiLine userId={userId} plan="builder" />
-      <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Each payment gives 30 days of access and does not renew automatically. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>
+      {BILLING_LIVE && <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Each payment gives 30 days of access and does not renew automatically. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>}
     </main>
   );
 }
@@ -1965,8 +1970,8 @@ function UpgradeWall({
         <p>{body}</p>
       </div>
       <div className="upgrade-wall-actions">
-        <button className="button button-primary button-small" onClick={onAction}>{actionLabel} <ArrowRight size={14} /></button>
-        <button className="button button-ghost button-small" onClick={onDismiss}>Not now</button>
+        {BILLING_LIVE && <button className="button button-primary button-small" onClick={onAction}>{actionLabel} <ArrowRight size={14} /></button>}
+        <button className="button button-ghost button-small" onClick={onDismiss}>{BILLING_LIVE ? 'Not now' : 'OK'}</button>
       </div>
     </motion.div>
   );
