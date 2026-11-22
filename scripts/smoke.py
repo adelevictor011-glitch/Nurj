@@ -42,7 +42,7 @@ for src in scripts + preloads:
     s2, js = get(BASE + src)
     check(f"Loads {src}", s2 == 200, f"HTTP {s2}")
     total += len(js.encode()); all_js += js
-# JavaScript a phone downloads before the first screen (uncompressed). Was 858 KB on 22 Nov 2026.
+# JavaScript a phone downloads before the first screen (uncompressed): 858 KB before lazy screens, 712 KB after (22 Nov 2026).
 check("First-screen JavaScript under 750 KB", 0 < total < 750 * 1000, f"{total:,} bytes")
 for pat in ("sk_live_", "sk_test_", "service_role", "gsk_", "xkeysib-"):
     check(f"No secret in app script ({pat})", pat not in all_js)
