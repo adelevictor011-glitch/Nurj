@@ -428,7 +428,11 @@ export async function POST(request: Request): Promise<Response> {
       }
       if (!isAddon) await supabase.rpc('ensure_active_business_unlocked', { p_user: user.id });
 
-      const result = await paystackRefund(payment.reference);
+      // Bank transfers (migration 013) can't be refunded through Paystack: the
+      // admin sends the money back by transfer, so it goes straight to manual.
+      const result = payment.reference.includes('-tr-')
+        ? { ok: false, message: 'Paid by bank transfer: send the refund back by transfer, then mark it done.' }
+        : await paystackRefund(payment.reference);
       await supabase
         .from('refund_requests')
         .update({ status: result.ok ? 'refunded' : 'pending', paystack_message: result.message })
