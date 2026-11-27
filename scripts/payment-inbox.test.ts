@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findAmounts, findTokens, isCreditAlert, parseEmail, senderAllowed, senderAuthenticated } from '../api/cron/payment-inbox';
+import { findAmounts, findTokens, isCreditAlert, parseEmail, senderAllowed, senderAuthenticated } from '../api/cron/expiry-reminders';
 
 const alert = [
   'Authentication-Results: mx.titan.email; spf=pass smtp.mailfrom=gtbank.com; dkim=pass header.d=gtbank.com; dmarc=pass header.from=gtbank.com',

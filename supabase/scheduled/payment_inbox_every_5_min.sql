@@ -1,6 +1,6 @@
 -- Nurj payment inbox agent, every 5 minutes.
 --
--- Calls /api/cron/payment-inbox, which reads the Titan payments inbox
+-- Calls /api/cron/expiry-reminders?job=payment-inbox, which reads the Titan payments inbox
 -- (read-only), confirms bank-alert matches and queues the rest for the admin
 -- console. Uses the same nurj_cron_secret as the 07:30 daily job, so run
 -- daily_job_0730_wat.sql first (or create the secret here the same way).
@@ -23,7 +23,7 @@ select cron.schedule(
   '*/5 * * * *',
   $$
   select net.http_get(
-    url := 'https://REPLACE_WITH_YOUR_DOMAIN/api/cron/payment-inbox',
+    url := 'https://REPLACE_WITH_YOUR_DOMAIN/api/cron/expiry-reminders?job=payment-inbox',
     headers := jsonb_build_object(
       'Authorization',
       'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'nurj_cron_secret')

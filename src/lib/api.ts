@@ -100,9 +100,9 @@ export const api = {
       `/api/payments/verify?reference=${encodeURIComponent(reference)}`,
     ),
   startTransfer: (plan: 'builder' | 'operator' | 'business_addon') =>
-    request<TransferCheckout>('/api/payments/transfer', { method: 'POST', body: JSON.stringify({ plan }) }),
+    request<TransferCheckout>('/api/payments/initialize', { method: 'POST', body: JSON.stringify({ plan, method: 'transfer' }) }),
   transferStatus: (reference: string) =>
-    request<TransferStatus>(`/api/payments/transfer?reference=${encodeURIComponent(reference)}`),
+    request<TransferStatus>(`/api/payments/initialize?reference=${encodeURIComponent(reference)}`),
   adminTransfer: (body: { action: 'confirm_transfer' | 'reject_transfer' | 'dismiss_message'; reference?: string; message_id?: string; note?: string }) =>
     request<{ activated?: boolean; needs_refund?: boolean; reason?: string; rejected?: boolean; dismissed?: boolean }>('/api/admin', { method: 'POST', body: JSON.stringify(body) }),
   account: () => request<{ refund: RefundStatus }>('/api/account'),
