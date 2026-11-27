@@ -1,13 +1,13 @@
 // Terms, Privacy and Refund policy text (roadmap feature 20).
 //
 // PROVISIONAL: adapted from the founder drafts and corrected to match how
-// Nurj actually works today (one-time 30-day passes, no auto-renewal, no
+// Nurj actually works today (30-day plans that auto-renew on card, no
 // analytics cookies). Have a Nigerian lawyer review before relying on it.
 // Bump LEGAL_VERSION whenever the text changes materially: signed-in users
 // are asked to accept the new version once.
 
-export const LEGAL_VERSION = '2026-10-04';
-export const LEGAL_UPDATED = '8 October 2026';
+export const LEGAL_VERSION = '2026-11-27';
+export const LEGAL_UPDATED = '27 November 2026';
 
 // TODO(founder): confirm these mailboxes exist before merging.
 export const SUPPORT_EMAIL = 'support@nurjai.com';
@@ -65,7 +65,9 @@ export const LEGAL_DOCUMENTS: Record<LegalKey, LegalDocument> = {
         'Nurj relies on Google (sign-in), Supabase (database), Vercel (hosting), Groq (AI processing), Paystack (payments) and Brevo (email). Their terms may also apply, and we are not responsible for their outages.',
       ] },
       { heading: '9. Plans, payments and refunds', body: [
-        'Paid plans are bought through Paystack at the prices shown in the app. Each payment gives 30 days of access and does not renew automatically.',
+        'Paid plans are bought through Paystack at the prices shown in the app. Each payment gives 30 days of access.',
+        'If you pay by card, your plan renews automatically every 30 days at the price shown when you bought it, charged to the same card. We email you 3 days before each renewal. You can turn auto-renew off at any time in Account settings, and your access then runs to the end of the period you paid for. Payments by bank transfer or USSD do not renew automatically.',
+        'If a renewal payment fails, we do not retry it. Your access ends at the end of the paid period and you can renew manually.',
         'You can get a full refund within 7 days of a payment, once per account, from Account settings. See the Refund Policy for details. Price changes do not affect access you have already paid for.',
       ] },
       { heading: '10. Fair use and daily limits', body: [
@@ -138,6 +140,7 @@ export const LEGAL_DOCUMENTS: Record<LegalKey, LegalDocument> = {
       { heading: '3. What happens next', body: [
         'The refund goes back to the card or account you paid with through Paystack. Banks usually take 5 to 10 working days to show it.',
         'The 30 days that payment added are removed from your plan straight away. If no paid time remains, your account returns to the free plan. Your prompts, history and saved items stay.',
+        'The 7-day refund also covers automatic renewals: if a renewal charged you and you did not mean to continue, ask within 7 days of that renewal.',
       ] },
       { heading: '4. Contact', body: [`Refund questions: ${SUPPORT_EMAIL}.`] },
     ],

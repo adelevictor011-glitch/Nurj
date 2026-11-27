@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { useDismiss } from './lib/useDismiss';
+import { ATTRIBUTION_EVENT, HEARD_OPTIONS, captureRef, setHeardFrom, syncAttribution } from './lib/attribution';
 import { GOALS, GUIDES, QUIZ, STAGES } from './data';
 import { api, type RefundStatus, type SectorInsights } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
@@ -241,6 +242,22 @@ function App() {
       notify(error instanceof Error ? error.message : 'Could not load your workspace.');
     }
   }, [notify, user]);
+
+  // Tracked links and "where did you hear": saved once the person signs in.
+  useEffect(() => { captureRef(); }, []);
+  useEffect(() => {
+    if (!supabase || !user) return undefined;
+    const client = supabase;
+    const userId = user.id;
+    const run = () => {
+      void syncAttribution(client, userId, profile).then((saved) => {
+        if (saved) setProfile((current) => ({ ...current, ...saved }));
+      });
+    };
+    run();
+    window.addEventListener(ATTRIBUTION_EVENT, run);
+    return () => window.removeEventListener(ATTRIBUTION_EVENT, run);
+  }, [user, profile.referral_source, profile.heard_from]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!supabase) return;
@@ -800,6 +817,12 @@ function Quiz({
           <div className="form-grid">
             <label className="full"><span>Your business</span><textarea className="field" value={business} maxLength={800} onChange={(event) => setBusiness(event.target.value)} placeholder="A one-person brand identity studio for Nigerian fashion businesses" /></label>
             <label className="full"><span>Target audience</span><textarea className="field" value={customer} maxLength={800} onChange={(event) => setCustomer(event.target.value)} placeholder="Founder-led fashion brands in Lagos selling through Instagram" /></label>
+            <label className="full"><span>Where did you hear about Nurj? (optional)</span>
+              <select className="field" defaultValue="" onChange={(event) => setHeardFrom(event.target.value)}>
+                <option value="" disabled>Choose one</option>
+                {HEARD_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </label>
           </div>
           <div className="canvas-footer">
             <button type="button" className="button button-ghost" onClick={() => onComplete(finishedStage, { business: '', customer: '' })}>Skip for now</button>
@@ -1722,6 +1745,19 @@ function Account({
                 <span>Send me the Monday momentum email: last week's wins and this week's one move.</span>
               </label>
             )}
+            {user && profile.plan !== 'free' && (
+              <label className="consent-check">
+                <input type="checkbox" checked={profile.auto_renew !== false} onChange={async (event) => {
+                  const on = event.target.checked;
+                  onProfile({ ...profile, auto_renew: on });
+                  if (supabase) {
+                    const { error } = await supabase.from('profiles').update({ auto_renew: on }).eq('id', user.id);
+                    notify(error ? 'Your renewal setting could not be saved.' : on ? 'Auto-renew is on.' : 'Auto-renew is off. Your access runs to the end of this period.');
+                  }
+                }} />
+                <span>Renew my plan automatically every 30 days, charged to the card I paid with. We email you 3 days before.</span>
+              </label>
+            )}
             <label className="consent-check">
               <input type="checkbox" checked={dataSaver} onChange={(event) => onDataSaver(event.target.checked)} />
               <span>Data saver: turn off animations and background effects on this device.</span>
@@ -1798,7 +1834,7 @@ function Upgrade({
         <PlanCard name="Operator" price="₦25,000" suffix="30 days" description="For founders running more than one hustle, or running Nurj all day." features={['Everything in Builder', 'Unlimited prompt runs*', 'A monthly prompt pack for your sector', 'Unlimited saved prompts', 'Up to 3 businesses (add 2 more for ₦5,000 each)']} active={currentPlan === 'operator'} busy={busy === 'operator'} onChoose={BILLING_LIVE ? () => onChoose('operator') : undefined} />
       </section>
       <RoiLine userId={userId} plan="builder" />
-      {BILLING_LIVE && <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Each payment gives 30 days of access and does not renew automatically. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>}
+      {BILLING_LIVE && <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Card payments renew automatically every 30 days; turn this off any time in Account settings and we email you 3 days before each renewal. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>}
     </main>
   );
 }
