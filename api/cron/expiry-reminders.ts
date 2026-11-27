@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -281,6 +281,82 @@ async function sendMondayDigest(supabase: SupabaseClient, force: boolean, budget
   return { candidates: profiles.length, queued: messages.length, sent };
 }
 
+// ---- auto-renewal: charge the saved card on the day access ends ----
+const RENEW_PRICES = { builder: 1_000_000, operator: 2_500_000 } as const;
+
+async function paystack<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`https://api.paystack.co${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.paystackSecretKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => ({}))) as { status?: boolean; message?: string; data?: T };
+  if (!response.ok || !payload.status || !payload.data) throw new Error(payload.message || 'Paystack request failed.');
+  return payload.data;
+}
+
+async function chargeRenewals(supabase: SupabaseClient) {
+  if (!process.env.PAYSTACK_SECRET_KEY) return { skipped: 'Paystack not configured' };
+  // Due = paid access ending within the next 26 hours (or lapsed in the last
+  // two days, if a run was missed), auto-renew on, and no failed attempt yet.
+  const { data: due, error } = await supabase
+    .from('profiles')
+    .select('id, display_name, plan, plan_expires_at')
+    .in('plan', ['builder', 'operator'])
+    .eq('auto_renew', true)
+    .is('renew_failed_at', null)
+    .gt('plan_expires_at', new Date(Date.now() - 2 * 86_400_000).toISOString())
+    .lte('plan_expires_at', new Date(Date.now() + 26 * 3_600_000).toISOString());
+  if (error) throw new ServerError('Renewals could not be read.');
+
+  let renewed = 0;
+  let failed = 0;
+  for (const row of due ?? []) {
+    const plan = row.plan as keyof typeof RENEW_PRICES;
+    const { data: auth } = await supabase.from('payment_authorizations').select('authorization_code, email, last4').eq('user_id', row.id).maybeSingle();
+    if (!auth) continue; // paid by transfer or USSD: nothing to charge, the reminder email covers it
+    const amount = RENEW_PRICES[plan];
+    const reference = `nurj-renew-${plan}-${randomUUID().replaceAll('-', '')}`;
+    const { error: insertError } = await supabase.from('payments').insert({
+      user_id: row.id, reference, plan, amount, currency: 'NGN', status: 'initialized', renewal: true,
+    });
+    if (insertError) { console.error('[renew] payment row failed', insertError.message); continue; }
+
+    let ok = false;
+    try {
+      const charge = await paystack<{ status: string; amount: number; currency: string; paid_at: string | null }>(
+        '/transaction/charge_authorization',
+        { authorization_code: auth.authorization_code, email: auth.email, amount: String(amount), currency: 'NGN', reference,
+          metadata: JSON.stringify({ user_id: row.id, plan, product: 'nurj_access_30_days', renewal: true }) },
+      );
+      if (charge.status === 'success' && charge.amount === amount && charge.currency === 'NGN') {
+        const { data: activation, error: activationError } = await supabase.rpc('activate_verified_payment', { p_reference: reference, p_paid_at: charge.paid_at });
+        ok = !activationError && Boolean((activation as { activated?: boolean })?.activated);
+      } else if (charge.status === 'pending' || charge.status === 'processing') {
+        continue; // the charge.success webhook activates it when the bank confirms
+      }
+    } catch (chargeError) {
+      console.error('[renew] charge failed', row.id, chargeError instanceof Error ? chargeError.message : chargeError);
+    }
+
+    if (ok) {
+      renewed += 1;
+      continue;
+    }
+    failed += 1;
+    await supabase.from('payments').update({ status: 'failed' }).eq('reference', reference);
+    await supabase.from('profiles').update({ renew_failed_at: new Date().toISOString() }).eq('id', row.id);
+    if (emailConfigured()) {
+      await sendEmail({
+        to: auth.email,
+        subject: 'Your Nurj renewal did not go through',
+        text: `Hi ${row.display_name ?? 'there'},\n\nWe tried to renew your Nurj ${plan === 'builder' ? 'Builder' : 'Operator'} plan on your card ending ${auth.last4 ?? '••••'}, but the payment did not go through, so we have not charged you.\n\nYour saved work is safe. Renew from Account settings whenever you are ready: ${env.appUrl}\n\n— Nurj`,
+      });
+    }
+  }
+  return { due: (due ?? []).length, renewed, failed };
+}
+
 async function sendExpiryReminders(supabase: SupabaseClient) {
   // Without an email provider, do nothing: marking people as reminded here
   // would mean they never get the reminder once email is switched on.
@@ -290,7 +366,7 @@ async function sendExpiryReminders(supabase: SupabaseClient) {
 
   const { data: due, error } = await supabase
     .from('profiles')
-    .select('id, display_name, plan, plan_expires_at, expiry_reminded_at')
+    .select('id, display_name, plan, plan_expires_at, expiry_reminded_at, auto_renew')
     .neq('plan', 'free')
     .gt('plan_expires_at', windowStart.toISOString())
     .lte('plan_expires_at', windowEnd.toISOString())
@@ -312,7 +388,15 @@ async function sendExpiryReminders(supabase: SupabaseClient) {
         const expires = new Date(row.plan_expires_at as string).toLocaleDateString('en-NG', {
           day: 'numeric', month: 'long', year: 'numeric',
         });
-        delivered = await sendEmail({
+        const planName = row.plan === 'builder' ? 'Builder' : 'Operator';
+        const { data: card } = row.auto_renew
+          ? await supabase.from('payment_authorizations').select('last4').eq('user_id', row.id).maybeSingle()
+          : { data: null };
+        delivered = card ? await sendEmail({
+          to: email,
+          subject: `Your Nurj ${planName} plan renews in 3 days`,
+          text: `Hi ${row.display_name ?? 'there'},\n\nYour Nurj ${planName} plan renews automatically on ${expires} for ${naira(RENEW_PRICES[row.plan as keyof typeof RENEW_PRICES] ?? 0)}, charged to your card ending ${card.last4 ?? '••••'}.\n\nNothing to do if you want to keep going. To stop it, turn off auto-renew in Account settings before then: ${env.appUrl}\n\n— Nurj`,
+        }) : await sendEmail({
           to: email,
           subject: 'Your Nurj access ends in 3 days',
           text: `Hi ${row.display_name ?? 'there'},\n\nYour Nurj ${row.plan === 'builder' ? 'Builder' : 'Operator'} access ends on ${expires}.\n\nRenewing keeps the daily limits off and your saved history exactly where it is: ${env.appUrl}\n\nIf you would rather pause, nothing happens automatically — you simply move back to the free plan.\n\n— Nurj`,
@@ -346,6 +430,13 @@ export async function GET(request: Request): Promise<Response> {
     // ?digest=force sends the digest on any day (for testing); it still
     // respects opt-outs and the once-a-week guard.
     const force = new URL(request.url).searchParams.get('digest') === 'force';
+    let renewals: unknown;
+    try {
+      renewals = await chargeRenewals(supabase);
+    } catch (renewError) {
+      console.error('[renew] failed', safeMessage(renewError));
+      renewals = { error: safeMessage(renewError) };
+    }
     const expiry = await sendExpiryReminders(supabase);
     let digest: unknown;
     try {
@@ -355,7 +446,7 @@ export async function GET(request: Request): Promise<Response> {
       console.error('[digest] failed', safeMessage(digestError));
       digest = { error: safeMessage(digestError) };
     }
-    return json({ expiry, digest });
+    return json({ renewals, expiry, digest });
   } catch (error) {
     return fail(safeMessage(error), statusFor(error, 500));
   }

@@ -143,6 +143,7 @@ function verifyTransaction(reference: string) {
     paid_at: string | null;
     customer: { email: string };
     metadata?: Record<string, unknown>;
+    authorization?: PaystackAuthorization;
   }>(`/transaction/verify/${encodeURIComponent(reference)}`);
 }
 
@@ -154,11 +155,30 @@ function verifyWebhookSignature(rawBody: string, signature: string | null): bool
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+interface PaystackAuthorization {
+  authorization_code?: string; reusable?: boolean; last4?: string; card_type?: string;
+  bank?: string; exp_month?: string; exp_year?: string;
+}
+
+// Keep the reusable card from a plan payment so auto-renewal can charge it.
+// Server-only table; a failure here never blocks the activation itself.
+async function saveAuthorization(supabase: SupabaseClient, userId: string, plan: string, email: string | undefined, auth: PaystackAuthorization | undefined) {
+  if ((plan !== 'builder' && plan !== 'operator') || !auth?.reusable || !auth.authorization_code || !email) return;
+  const { error } = await supabase.from('payment_authorizations').upsert({
+    user_id: userId, authorization_code: auth.authorization_code, email, plan,
+    last4: auth.last4 ?? null, card_type: auth.card_type ?? null, bank: auth.bank ?? null,
+    exp_month: auth.exp_month ?? null, exp_year: auth.exp_year ?? null, updated_at: new Date().toISOString(),
+  });
+  if (error) console.error('[payments] authorization not saved', error.message);
+}
+
 async function activatePayment(supabase: SupabaseClient, reference: string, transaction: {
   status: string;
   amount: number;
   currency: string;
   paid_at: string | null;
+  customer?: { email: string };
+  authorization?: PaystackAuthorization;
 }) {
   const { data: payment, error: paymentError } = await supabase
     .from('payments')
@@ -178,6 +198,9 @@ async function activatePayment(supabase: SupabaseClient, reference: string, tran
     p_paid_at: transaction.paid_at,
   });
   if (error) throw new ServerError('The plan could not be activated.');
+  if ((data as { activated?: boolean })?.activated) {
+    await saveAuthorization(supabase, payment.user_id as string, plan, transaction.customer?.email, transaction.authorization);
+  }
   return data as { activated: boolean; plan: PaidPlan; expires_at?: string; needs_refund?: boolean; reason?: string };
 }
 

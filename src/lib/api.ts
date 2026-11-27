@@ -134,7 +134,18 @@ export type RefundStatus =
   | { eligible: true; amount: number; plan: string; deadline: string }
   | { eligible: false; reason: string };
 
+export interface AdminGrowth {
+  funnel: {
+    signups_30d: number; first_prompt_10min_pct: number | null; paid_pct_of_mature: number | null;
+    free_users_hitting_limit_7d: number; enhancer_tried_pct_free: number | null;
+    renewals_30d: number; renewals_failed_30d: number; auto_renew_off: number;
+  };
+  by_source: Array<{ source: string; signups: number; paid: number }>;
+  heard_from: Array<{ answer: string; count: number }>;
+}
+
 export interface AdminData {
+  growth?: AdminGrowth | null;
   overview: {
     users_total: number;
     users_new_7d: number;

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { GOALS } from '../data';
-import { api, type AdminData } from '../lib/api';
+import { api, type AdminData, type AdminGrowth } from '../lib/api';
 
 const naira = (kobo: number) => `₦${Math.round(kobo / 100).toLocaleString('en-NG')}`;
 const number = (value: number) => Number(value).toLocaleString('en-NG');
@@ -109,6 +109,8 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
         <article className="panel"><span>AI tokens</span><strong>{number(o.tokens_today)}</strong><small>today · {number(o.tokens_30d)} in 30 days</small></article>
       </section>
 
+      {data.growth && <GrowthPanel growth={data.growth} />}
+
       {data.insights && (
         <section className="panel">
           <div className="panel-title"><div><span className="eyebrow">Batch 5 · sector insights</span><h3>Progress to the 30-report threshold</h3></div><span>Insights switch on by themselves</span></div>
@@ -185,5 +187,40 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
         </article>
       </section>
     </div>
+  );
+}
+
+const pct = (value: number | null) => (value === null || value === undefined ? '—' : `${value}%`);
+
+/** The conversion and retention engine, step by step, plus where users come from. */
+function GrowthPanel({ growth }: { growth: AdminGrowth }) {
+  const f = growth.funnel;
+  const steps: Array<[string, string, string, boolean | null]> = [
+    ['Sign-ups, 30 days', String(f.signups_30d), 'Comp accounts excluded', null],
+    ['First prompt within 10 minutes', pct(f.first_prompt_10min_pct), 'Of 30-day sign-ups · goal 60%+', f.first_prompt_10min_pct === null ? null : f.first_prompt_10min_pct >= 60],
+    ['Free users who tried the enhancer', pct(f.enhancer_tried_pct_free), 'Under 10%: add a "make it stronger" prompt', f.enhancer_tried_pct_free === null ? null : f.enhancer_tried_pct_free >= 10],
+    ['Free users hitting the daily limit', String(f.free_users_hitting_limit_7d), 'Last 7 days · send each a 3-day Builder pass', null],
+    ['Paid, of users 30+ days old', pct(f.paid_pct_of_mature), 'Goal 6% · under 3%: fix onboarding first', f.paid_pct_of_mature === null ? null : f.paid_pct_of_mature >= 6],
+    ['Renewals, 30 days', `${f.renewals_30d} renewed · ${f.renewals_failed_30d} failed`, `${f.auto_renew_off} paying users have auto-renew off`, null],
+  ];
+  return (
+    <section className="panel">
+      <div className="panel-title"><div><span className="eyebrow">Conversion and retention engine</span><h3>Where users drop off</h3></div><span>Fix the weakest step first</span></div>
+      <table className="admin-table"><tbody>
+        {steps.map(([label, value, note, good]) => (
+          <tr key={label}><td>{label}<br /><small>{note}</small></td><td><strong className={good === null ? undefined : good ? 'good' : 'warn'}>{value}</strong></td></tr>
+        ))}
+      </tbody></table>
+      <section className="admin-grid">
+        <div>
+          <h3 className="admin-sub">By tracked link</h3>
+          {growth.by_source.length ? <table className="admin-table"><tbody>{growth.by_source.map((row) => <tr key={row.source}><td>{row.source}</td><td>{row.signups} sign-ups · {row.paid} paid</td></tr>)}</tbody></table> : <p className="admin-empty">No sign-ups yet.</p>}
+        </div>
+        <div>
+          <h3 className="admin-sub">Where did you hear about Nurj?</h3>
+          {growth.heard_from.length ? <table className="admin-table"><tbody>{growth.heard_from.map((row) => <tr key={row.answer}><td>{row.answer}</td><td>{row.count}</td></tr>)}</tbody></table> : <p className="admin-empty">No answers yet.</p>}
+        </div>
+      </section>
+    </section>
   );
 }

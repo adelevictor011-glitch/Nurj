@@ -79,6 +79,9 @@ export interface UserProfile {
   terms_accepted_at?: string | null;
   active_business_id?: string | null;
   digest_opt_out?: boolean;
+  referral_source?: string | null;
+  heard_from?: string | null;
+  auto_renew?: boolean;
 }
 
 export interface UsageStatus {
