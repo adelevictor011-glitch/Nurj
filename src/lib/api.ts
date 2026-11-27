@@ -99,6 +99,12 @@ export const api = {
     request<{ activated: boolean; plan: 'builder' | 'operator' | 'business_addon'; expires_at?: string; needs_refund?: boolean; reason?: string }>(
       `/api/payments/verify?reference=${encodeURIComponent(reference)}`,
     ),
+  startTransfer: (plan: 'builder' | 'operator' | 'business_addon') =>
+    request<TransferCheckout>('/api/payments/initialize', { method: 'POST', body: JSON.stringify({ plan, method: 'transfer' }) }),
+  transferStatus: (reference: string) =>
+    request<TransferStatus>(`/api/payments/initialize?reference=${encodeURIComponent(reference)}`),
+  adminTransfer: (body: { action: 'confirm_transfer' | 'reject_transfer' | 'dismiss_message'; reference?: string; message_id?: string; note?: string }) =>
+    request<{ activated?: boolean; needs_refund?: boolean; reason?: string; rejected?: boolean; dismissed?: boolean }>('/api/admin', { method: 'POST', body: JSON.stringify(body) }),
   account: () => request<{ refund: RefundStatus }>('/api/account'),
   admin: () => request<AdminData>('/api/admin'),
   adminGrant: (body: { email: string; plan: string; days: number; note: string }) =>
@@ -174,6 +180,76 @@ export interface AdminData {
     payments_needing_refund: number;
   } | null;
   insights: Array<{ category: string; reports: number; live_goals: number; best_goal_reports: number | null }> | null;
+  financials?: AdminFinancials | null;
+  transfers?: AdminTransfer[] | null;
+  transfer_reviews?: AdminTransferReview[] | null;
+}
+
+export interface TransferCheckout {
+  reference: string;
+  plan: 'builder' | 'operator' | 'business_addon';
+  plan_label: string;
+  amount_kobo: number;
+  token: string;
+  status: string;
+  proof_received: boolean;
+  expires_at: string;
+  bank: { name: string; account_number: string; account_name: string };
+  proof_email: string;
+}
+
+export interface TransferStatus {
+  status: string;
+  plan: string;
+  proof_received: boolean;
+  plan_expires_at: string | null;
+}
+
+export interface AdminFinancialDay {
+  day: string;
+  signups: number;
+  active_users: number;
+  prompts: number;
+  enhancements: number;
+  ai_tokens: number;
+  card_kobo: number;
+  transfer_kobo: number;
+  payments: number;
+  renewals: number;
+  refunds_kobo: number;
+}
+
+export interface AdminFinancials {
+  days: AdminFinancialDay[];
+  run_rate_kobo: number;
+  transfers_pending: number;
+  inbox_needs_review: number;
+  ai_cost_ngn_per_million: number | null;
+}
+
+export interface AdminTransfer {
+  reference: string;
+  plan: string;
+  amount_kobo: number;
+  status: string;
+  token: string;
+  email: string | null;
+  created_at: string;
+  expires_at: string;
+  proof_received_at: string | null;
+}
+
+export interface AdminTransferReview {
+  message_id: string;
+  kind: 'bank_alert' | 'proof' | 'other';
+  from_address: string | null;
+  subject: string | null;
+  received_at: string | null;
+  token: string | null;
+  amount_kobo: number | null;
+  authenticated: boolean;
+  detail: string | null;
+  payment_reference: string | null;
 }
 
 export interface ChannelResult {

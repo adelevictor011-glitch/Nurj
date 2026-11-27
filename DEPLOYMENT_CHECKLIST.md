@@ -51,6 +51,25 @@
 - [ ] Confirm refreshing the callback does not add another 30 days.
 - [ ] Switch to live keys only after the test checklist passes.
 
+## Bank transfer checkout (until Paystack is live)
+
+How it works: the customer taps a plan, sees your account details, the exact
+amount and a token like `NURJ-K7Q4MX`, puts the token in the narration and
+emails the receipt to the payments inbox. Every 5 minutes the inbox agent
+reads that inbox (read-only). A credit alert from your bank that carries the
+token and the exact amount switches the plan on by itself and emails the
+customer. A receipt on its own never does, because receipts are easy to fake.
+Anything else (no token, wrong amount, unverified sender) goes to **Admin →
+Payments to confirm** for one click.
+
+- [ ] Run `supabase/migrations/013_bank_transfer.sql`.
+- [ ] Have your bank send credit alerts to the Titan inbox (for example support@nurjai.com), either directly or with a forwarding rule.
+- [ ] In Vercel, set `BANK_NAME`, `BANK_ACCOUNT_NUMBER`, `BANK_ACCOUNT_NAME`, `PAYMENT_PROOF_EMAIL`, `INBOX_IMAP_USER`, `INBOX_IMAP_PASSWORD` and `BANK_ALERT_SENDERS`, then `VITE_TRANSFER_LIVE=true`. Redeploy.
+- [ ] Open one real bank alert in Titan, choose "Show original", and copy the first word after `Authentication-Results:` in the TOP header into `INBOX_AUTHSERV_ID`. Until it is set, alerts wait for a click instead of auto-confirming.
+- [ ] Run `supabase/scheduled/payment_inbox_every_5_min.sql` (replace the domain first).
+- [ ] Test: start a Builder transfer, send ₦10,000 with the token, email the receipt. Within 5 minutes the waiting screen should turn green and the customer email should arrive.
+- [ ] When Paystack goes live, set `VITE_BILLING_LIVE=true`. Transfer checkout switches off by itself, and open transfers can still be confirmed in admin.
+
 ## Search
 
 - [ ] After the guide library ships, submit `https://nurjai.com/sitemap.xml` in Google Search Console.

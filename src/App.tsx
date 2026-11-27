@@ -47,6 +47,7 @@ import { api, type RefundStatus, type SectorInsights } from './lib/api';
 import { assignStage, classifyBusiness, localPrompt } from './lib/business';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { SavedSnippets } from './components/SavedSnippets';
+import { TransferCheckout } from './components/TransferCheckout';
 import { SectorInsightsCard, goalWinRate } from './components/SectorInsights';
 import { useUsageConfirm } from './components/UsageConfirm';
 import { SaveToLibrary } from './components/SaveToLibrary';
@@ -79,8 +80,12 @@ function ScreenLoading() {
 }
 
 // Paid plans stay hidden until billing launches. Set VITE_BILLING_LIVE=true in
-// Vercel (with PAYSTACK_SECRET_KEY) and redeploy to switch checkout on.
-const BILLING_LIVE = import.meta.env.VITE_BILLING_LIVE === 'true';
+// Vercel (with PAYSTACK_SECRET_KEY) and redeploy to switch card checkout on.
+// VITE_TRANSFER_LIVE=true (with the BANK_* variables) opens bank transfer
+// checkout instead, while card payments are not live yet.
+const CARD_LIVE = import.meta.env.VITE_BILLING_LIVE === 'true';
+const TRANSFER_LIVE = !CARD_LIVE && import.meta.env.VITE_TRANSFER_LIVE === 'true';
+const BILLING_LIVE = CARD_LIVE || TRANSFER_LIVE;
 
 const EMPTY_USAGE: UsageStatus = {
   prompt: { used: 0, limit: 5, remaining: 5 },
@@ -152,6 +157,7 @@ function App() {
     return () => wide.removeEventListener('change', onChange);
   }, []);
   const [paymentBusy, setPaymentBusy] = useState<PlanKey | 'business_addon' | null>(null);
+  const [transferPlan, setTransferPlan] = useState<'builder' | 'operator' | 'business_addon' | null>(null);
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [dataSaver, setDataSaver] = useState(() => loadLocal<boolean>('nurj-data-saver', false));
   const [pendingReference, setPendingReference] = useState<string | null>(null);
@@ -431,6 +437,10 @@ function App() {
       await signIn();
       return;
     }
+    if (TRANSFER_LIVE) {
+      setTransferPlan(plan);
+      return;
+    }
     setPaymentBusy(plan);
     try {
       const checkout = await api.initializePayment(plan);
@@ -471,6 +481,16 @@ function App() {
             localStorage.removeItem('nurj-pending-reference');
             setPendingReference(null);
             setVerifyState('idle');
+          }}
+        />
+      )}
+      {transferPlan && (
+        <TransferCheckout
+          plan={transferPlan}
+          onClose={() => setTransferPlan(null)}
+          onActivated={(label) => {
+            notify(`${label} is now active.`);
+            void syncStatus({ redirect: false });
           }}
         />
       )}
@@ -1834,7 +1854,8 @@ function Upgrade({
         <PlanCard name="Operator" price="₦25,000" suffix="30 days" description="For founders running more than one hustle, or running Nurj all day." features={['Everything in Builder', 'Unlimited prompt runs*', 'A monthly prompt pack for your sector', 'Unlimited saved prompts', 'Up to 3 businesses (add 2 more for ₦5,000 each)']} active={currentPlan === 'operator'} busy={busy === 'operator'} onChoose={BILLING_LIVE ? () => onChoose('operator') : undefined} />
       </section>
       <RoiLine userId={userId} plan="builder" />
-      {BILLING_LIVE && <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Card payments renew automatically every 30 days; turn this off any time in Account settings and we email you 3 days before each renewal. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>}
+      {TRANSFER_LIVE && <p className="pricing-note"><ShieldCheck size={14} /> Pay by bank transfer for now; card payments are launching soon. Your plan switches on as soon as the transfer arrives, usually within 30 minutes during the day. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>}
+      {CARD_LIVE && <p className="pricing-note"><ShieldCheck size={14} /> Payments are verified server-side through Paystack. Card payments renew automatically every 30 days; turn this off any time in Account settings and we email you 3 days before each renewal. 7-day money-back guarantee. *Paid plans have a fair-use ceiling of 150 AI actions a day.</p>}
     </main>
   );
 }

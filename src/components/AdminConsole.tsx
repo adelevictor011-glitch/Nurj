@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { GOALS } from '../data';
-import { api, type AdminData, type AdminGrowth } from '../lib/api';
+import { api, type AdminData, type AdminFinancials, type AdminGrowth, type AdminTransfer, type AdminTransferReview } from '../lib/api';
 
 const naira = (kobo: number) => `₦${Math.round(kobo / 100).toLocaleString('en-NG')}`;
 const number = (value: number) => Number(value).toLocaleString('en-NG');
@@ -108,6 +108,12 @@ export function AdminConsole({ notify }: { notify: (message: string) => void }) 
         <article className="panel"><span>Revenue, 30 days</span><strong>{naira(o.revenue_30d_kobo - o.refunds_30d_kobo)}</strong><small>After {naira(o.refunds_30d_kobo)} refunds · goal ₦600k{o.refunds_pending ? ` · ${o.refunds_pending} refund${o.refunds_pending === 1 ? '' : 's'} need manual action` : ''}</small></article>
         <article className="panel"><span>AI tokens</span><strong>{number(o.tokens_today)}</strong><small>today · {number(o.tokens_30d)} in 30 days</small></article>
       </section>
+
+      {(data.transfers || data.transfer_reviews) && (
+        <TransfersPanel transfers={data.transfers ?? []} reviews={data.transfer_reviews ?? []} notify={notify} onChange={() => void load()} />
+      )}
+
+      {data.financials && <FinancialsPanel financials={data.financials} />}
 
       {data.growth && <GrowthPanel growth={data.growth} />}
 
@@ -221,6 +227,161 @@ function GrowthPanel({ growth }: { growth: AdminGrowth }) {
           {growth.heard_from.length ? <table className="admin-table"><tbody>{growth.heard_from.map((row) => <tr key={row.answer}><td>{row.answer}</td><td>{row.count}</td></tr>)}</tbody></table> : <p className="admin-empty">No answers yet.</p>}
         </div>
       </section>
+    </section>
+  );
+}
+
+const PLAN_NAMES: Record<string, string> = { builder: 'Builder', operator: 'Operator', business_addon: 'Extra business' };
+const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+
+/** Bank transfers waiting for money, and inbox emails the agent could not settle alone. */
+function TransfersPanel({ transfers, reviews, notify, onChange }: {
+  transfers: AdminTransfer[];
+  reviews: AdminTransferReview[];
+  notify: (message: string) => void;
+  onChange: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const byReference = new Map(transfers.map((row) => [row.reference, row]));
+
+  async function act(key: string, body: Parameters<typeof api.adminTransfer>[0], confirmText?: string) {
+    if (confirmText && !window.confirm(confirmText)) return;
+    setBusy(key);
+    try {
+      const result = await api.adminTransfer(body);
+      notify(result.needs_refund ? result.reason ?? 'Paid, but the plan could not be applied. Refund it.'
+        : result.activated ? 'Confirmed. The plan is active and the customer has been emailed.'
+        : result.rejected ? 'Transfer marked as not received.' : 'Dismissed.');
+      onChange();
+    } catch (actError) {
+      notify(actError instanceof Error ? actError.message : 'That did not work.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-title">
+        <div><span className="eyebrow">Bank transfers</span><h3>Payments to confirm</h3></div>
+        <span>{reviews.length ? <span className="admin-alert">{reviews.length} email{reviews.length === 1 ? '' : 's'} need a look</span> : 'The inbox agent confirms matched bank alerts by itself'}</span>
+      </div>
+
+      {reviews.length > 0 && (
+        <>
+          <h3 className="admin-sub">Needs your decision</h3>
+          <table className="admin-table">
+            <thead><tr><th>Email</th><th>Why it stopped</th><th /></tr></thead>
+            <tbody>{reviews.map((row) => {
+              const match = row.payment_reference ? byReference.get(row.payment_reference) : undefined;
+              return (
+                <tr key={row.message_id}>
+                  <td>
+                    {row.kind === 'bank_alert' ? 'Bank alert' : 'Proof email'} · {when(row.received_at)}<br />
+                    <small>{row.from_address ?? 'unknown'}{row.subject ? ` · ${row.subject}` : ''}</small>
+                  </td>
+                  <td>
+                    {row.detail}
+                    {row.amount_kobo ? <><br /><small>Amount seen: {naira(row.amount_kobo)}{row.token ? ` · NURJ-${row.token}` : ''}</small></> : null}
+                    {match && <><br /><small>Matches {match.token} · {match.email ?? 'no email'} · {PLAN_NAMES[match.plan] ?? match.plan} {naira(match.amount_kobo)}</small></>}
+                  </td>
+                  <td className="admin-actions">
+                    {match && (
+                      <button className="button button-primary button-small" disabled={busy !== null}
+                        onClick={() => void act(row.message_id, { action: 'confirm_transfer', reference: match.reference, message_id: row.message_id },
+                          `Confirm ${naira(match.amount_kobo)} from ${match.email ?? 'this customer'} and switch on ${PLAN_NAMES[match.plan] ?? match.plan}? Check your bank app first.`)}>
+                        Confirm
+                      </button>
+                    )}
+                    <button className="button button-ghost button-small" disabled={busy !== null}
+                      onClick={() => void act(row.message_id, { action: 'dismiss_message', message_id: row.message_id })}>Dismiss</button>
+                  </td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        </>
+      )}
+
+      <h3 className="admin-sub">Open transfers</h3>
+      {transfers.length ? (
+        <table className="admin-table">
+          <thead><tr><th>Customer</th><th>Token</th><th>Status</th><th /></tr></thead>
+          <tbody>{transfers.map((row) => (
+            <tr key={row.reference}>
+              <td>{row.email ?? '—'}<br /><small>{PLAN_NAMES[row.plan] ?? row.plan} · {naira(row.amount_kobo)} · started {when(row.created_at)}</small></td>
+              <td><strong>{row.token}</strong></td>
+              <td>{row.proof_received_at ? `Receipt in ${when(row.proof_received_at)}` : 'Waiting'}{new Date(row.expires_at).getTime() < Date.now() ? <><br /><small>Token expired</small></> : null}</td>
+              <td className="admin-actions">
+                <button className="button button-secondary button-small" disabled={busy !== null}
+                  onClick={() => void act(row.reference, { action: 'confirm_transfer', reference: row.reference },
+                    `Only confirm if ${naira(row.amount_kobo)} with ${row.token} is in your bank account. Switch on ${PLAN_NAMES[row.plan] ?? row.plan} for ${row.email ?? 'this customer'}?`)}>
+                  Confirm
+                </button>
+                <button className="button button-ghost button-small" disabled={busy !== null}
+                  onClick={() => void act(row.reference, { action: 'reject_transfer', reference: row.reference }, `Mark ${row.token} as not received? The customer can start a new transfer.`)}>
+                  Not received
+                </button>
+              </td>
+            </tr>
+          ))}</tbody>
+        </table>
+      ) : <p className="admin-empty">No open transfers.</p>}
+    </section>
+  );
+}
+
+/** Daily money and activity, Lagos days, newest first. */
+function FinancialsPanel({ financials }: { financials: AdminFinancials }) {
+  const days = financials.days;
+  const rate = financials.ai_cost_ngn_per_million;
+  const sum = (pick: (day: AdminFinancials['days'][number]) => number, list = days) => list.reduce((total, day) => total + Number(pick(day) || 0), 0);
+  const gross = (day: AdminFinancials['days'][number]) => Number(day.card_kobo) + Number(day.transfer_kobo) - Number(day.refunds_kobo);
+  const week = days.slice(0, 7);
+  const revenue30 = sum(gross);
+  const revenue7 = sum(gross, week);
+  const aiCostKobo = (tokens: number) => (rate ? Math.round((tokens / 1_000_000) * rate * 100) : null);
+  const ai30 = aiCostKobo(sum((day) => day.ai_tokens));
+  const maxRevenue = Math.max(1, ...days.map(gross));
+  const avgActive = week.length ? Math.round(sum((day) => day.active_users, week) / week.length) : 0;
+  const chartDays = [...days].reverse();
+
+  return (
+    <section className="panel">
+      <div className="panel-title"><div><span className="eyebrow">Financials</span><h3>Money and activity, by day</h3></div><span>Lagos time · comp accounts excluded from sign-ups</span></div>
+      <section className="admin-metrics">
+        <article className="panel"><span>Net revenue, 7 days</span><strong>{naira(revenue7)}</strong><small>{naira(revenue30)} in 30 days</small></article>
+        <article className="panel"><span>Active plans, monthly value</span><strong>{naira(financials.run_rate_kobo)}</strong><small>What paying users are worth per 30 days</small></article>
+        <article className="panel"><span>By transfer, 30 days</span><strong>{naira(sum((day) => day.transfer_kobo))}</strong><small>{naira(sum((day) => day.card_kobo))} by card</small></article>
+        <article className="panel"><span>AI cost, 30 days</span><strong>{ai30 === null ? '—' : naira(ai30)}</strong><small>{ai30 === null ? 'Set AI_COST_NGN_PER_MILLION_TOKENS' : `Margin ${revenue30 ? Math.round(((revenue30 - ai30) / revenue30) * 100) : 0}%`}</small></article>
+        <article className="panel"><span>Daily active users</span><strong>{number(avgActive)}</strong><small>Average over 7 days</small></article>
+        <article className="panel"><span>Transfers waiting</span><strong>{number(financials.transfers_pending)}</strong><small>{financials.inbox_needs_review} inbox email{financials.inbox_needs_review === 1 ? '' : 's'} to review</small></article>
+      </section>
+
+      <div className="fin-bars" role="img" aria-label="Net revenue per day, last 30 days">
+        {chartDays.map((day) => (
+          <span key={day.day} style={{ height: `${Math.max(2, (gross(day) / maxRevenue) * 100)}%` }} className={gross(day) > 0 ? 'on' : ''}
+            title={`${day.day}: ${naira(gross(day))} · ${day.payments} payment${day.payments === 1 ? '' : 's'}`} />
+        ))}
+      </div>
+
+      <div className="admin-table-scroll">
+        <table className="admin-table fin-table">
+          <thead><tr><th>Day</th><th>Revenue</th><th>Payments</th><th>Sign-ups</th><th>Active</th><th>Prompts</th><th>AI tokens</th>{rate ? <th>AI cost</th> : null}</tr></thead>
+          <tbody>{days.map((day) => (
+            <tr key={day.day}>
+              <td>{new Date(`${day.day}T12:00:00`).toLocaleDateString('en-NG', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+              <td>{naira(gross(day))}{Number(day.refunds_kobo) > 0 ? <small> after {naira(Number(day.refunds_kobo))} refunds</small> : null}</td>
+              <td>{day.payments}{day.renewals ? <small> · {day.renewals} renewal{day.renewals === 1 ? '' : 's'}</small> : null}</td>
+              <td>{number(day.signups)}</td>
+              <td>{number(day.active_users)}</td>
+              <td>{number(day.prompts)}{day.enhancements ? <small> + {number(day.enhancements)} enh.</small> : null}</td>
+              <td>{number(day.ai_tokens)}</td>
+              {rate ? <td>{naira(aiCostKobo(Number(day.ai_tokens)) ?? 0)}</td> : null}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
     </section>
   );
 }
